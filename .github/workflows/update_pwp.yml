@@ -1,4 +1,4 @@
-name: Update Pasadena W&P Rates
+name: PWP Auto Update
 
 on:
   # 1. Runs automatically on the 1st of every month at 13:00 UTC (6:00 AM PT)

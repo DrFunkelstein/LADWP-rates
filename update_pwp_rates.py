@@ -14,7 +14,7 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 
-URL = "https://pwp.cityofpasadena.net/water-and-electric-rates/#powres"
+URL = "https://pwp.cityofpasadena.net/water-and-electric-rates"
 OUTPUT_FILE = "pwp_rates.json"
 
 

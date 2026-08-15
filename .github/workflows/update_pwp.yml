@@ -1,75 +1,46 @@
 name: PWP Auto Update
-
 on:
-  # 1. Runs automatically on the 1st of every month at 13:00 UTC (6:00 AM PT)
   schedule:
-    - cron: '0 13 1 * *'
-
-  # 2. Allows manual trigger from GitHub UI with Dry Run and Verbose toggles
-  workflow_dispatch:
+    - cron: '0 10 1 * *' 
+  workflow_dispatch: 
     inputs:
       dry_run:
-        description: 'Dry Run (Audit & print diffs without committing)'
+        description: 'Dry Run (Check for changes but do not save)'
         required: true
         type: boolean
         default: false
-      verbose:
-        description: 'Enable verbose logging output'
-        required: true
-        type: boolean
-        default: true
 
-permissions:
-  contents: write
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  scrape-rates:
+  build:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4 
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5 
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
+        run: pip install requests beautifulsoup4
 
-      - name: Run PWP Scraper
+      - name: Run Scraper
+        # Passes --dry-run to update_pwp_rates.py if checked
         run: |
-          DRY_RUN_FLAG=""
-          VERBOSE_FLAG=""
-          
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            DRY_RUN_FLAG="--dry-run"
-          fi
-          
-          if [ "${{ inputs.verbose }}" = "true" ] || [ "${{ github.event_name }}" = "schedule" ]; then
-            VERBOSE_FLAG="--verbose"
-          fi
-          
-          python update_pwp_rates.py $DRY_RUN_FLAG $VERBOSE_FLAG
+          python update_pwp_rates.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
 
-      - name: Commit and Push Updated Rates
-        if: ${{ inputs.dry_run != true }}
+      - name: Commit and Push Changes
+        # This step is skipped entirely if dry_run is true
+        if: github.event.inputs.dry_run != 'true'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Stage all modified rate json files
-          git add *_rates.json
-          
-          # Only commit if there are real changes
-          if git diff --staged --quiet; then
-            echo "No rate changes detected. Working tree clean."
-          else
-            git commit -m "Auto-update utility rate tables ($(date +'%Y-%m-%d')) [skip ci]"
-            git push
-            echo "Successfully pushed rate updates to repository."
-          fi
+          git config --global user.name 'PWP-Bot'
+          git config --global user.email 'bot@utilityestimator.com'
+          git add pwp_rates.json
+          # Commit only if there are changes; '|| exit 0' prevents failure if no changes
+          git commit -m "Automated PWP rate update: $(date)" || exit 0
+          git push

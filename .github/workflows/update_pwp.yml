@@ -54,7 +54,7 @@ jobs:
             VERBOSE_FLAG="--verbose"
           fi
           
-          python scrape_pwp.py $DRY_RUN_FLAG $VERBOSE_FLAG
+          python update_pwp_rates.py $DRY_RUN_FLAG $VERBOSE_FLAG
 
       - name: Commit and Push Updated Rates
         if: ${{ inputs.dry_run != true }}

@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+import io
 import re
 import requests
 import pandas as pd
@@ -10,15 +11,19 @@ from datetime import datetime
 # --- CONFIGURATION ---
 XLSX_URL = "https://www.pge.com/assets/rates/tariffs/res-inclu-tou-current.xlsx"
 PGE_NSC_PDF_URL = "https://www.pge.com/assets/pge/docs/clean-energy/solar/AB920-RateTable.pdf"
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
 JSON_FILE = os.path.normpath(os.path.join(ROOT_DIR, "rates", "pge_rates.json"))
 
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
+
 def download_xlsx(url, save_path):
     print(f"[Network] Downloading XLSX from: {url}")
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=30)
+        response = requests.get(url, headers=HEADERS, timeout=30)
         response.raise_for_status()
         with open(save_path, 'wb') as f:
             f.write(response.content)
@@ -36,6 +41,44 @@ def clean_val(val):
         return float(s)
     except:
         return 0.0
+
+def fetch_pge_solar_clawback_rates():
+    """
+    Downloads and parses PG&E's AB 920 Net Surplus Compensation (NSC) rate PDF.
+    Extracts the latest published $/kWh value from the table.
+    """
+    print("\n[Solar Scan] Checking PG&E AB920 NSC Rate Table PDF...")
+    
+    nsc_rate = 0.03200        # Verified fallback
+    sbp_export_rate = 0.07500 # CPUC Avoided Cost benchmark export credit
+    
+    try:
+        res = requests.get(PGE_NSC_PDF_URL, headers=HEADERS, timeout=20)
+        if res.status_code == 200:
+            try:
+                import pypdf
+                reader = pypdf.PdfReader(io.BytesIO(res.content))
+                text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+            except ImportError:
+                text = res.content.decode('latin1', errors='ignore')
+            
+            matches = re.findall(r"\$?0\.0\d{3,5}", text)
+            if matches:
+                cleaned = [float(m.replace("$", "")) for m in matches if float(m.replace("$", "")) > 0.005]
+                if cleaned:
+                    nsc_rate = cleaned[-1]
+                    print(f"  > Parsed Latest PG&E NSC Rate from PDF: ${nsc_rate:.5f}/kWh")
+            else:
+                print(f"  > Retaining Verified Fallback NSC Rate: ${nsc_rate:.5f}/kWh")
+        else:
+            print(f"  [Warning] HTTP {res.status_code} fetching NSC PDF. Retaining fallback.")
+    except Exception as e:
+        print(f"  [Warning] Failed to fetch/parse NSC PDF ({e}). Retaining fallback.")
+
+    return {
+        "nscRate": nsc_rate,
+        "sbpExportRate": sbp_export_rate
+    }
 
 def parse_pge_baseline_allowances(xlsx):
     """
@@ -208,48 +251,6 @@ def cleanup_bins(data):
                 if season in data[plan_id]:
                     data[plan_id][season]["superOffPeak"] = 0.0
     return data
-
-def fetch_pge_solar_clawback_rates():
-    """
-    Downloads and parses PG&E's AB 920 Net Surplus Compensation (NSC) rate PDF.
-    Extracts the latest published $/kWh value from the table.
-    """
-    print("\n[Solar Scan] Checking PG&E AB920 NSC Rate Table PDF...")
-    
-    nsc_rate = 0.03200     # Verified fallback
-    sbp_export_rate = 0.07500 # CPUC Avoided Cost benchmark export credit
-    
-    try:
-        res = requests.get(PGE_NSC_PDF_URL, headers=HEADERS, timeout=20)
-        if res.status_code == 200:
-            # Extract text from PDF stream
-            try:
-                import pypdf
-                reader = pypdf.PdfReader(io.BytesIO(res.content))
-                text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-            except ImportError:
-                # Fallback text extraction if pypdf is not installed
-                text = res.content.decode('latin1', errors='ignore')
-            
-            # Find all decimal rates formatted like $0.0XXXX or 0.0XXXX
-            matches = re.findall(r"\$?0\.0\d{3,5}", text)
-            if matches:
-                # The latest rate appears at the end of the table
-                cleaned = [float(m.replace("$", "")) for m in matches if float(m.replace("$", "")) > 0.005]
-                if cleaned:
-                    nsc_rate = cleaned[-1]
-                    print(f"  > Parsed Latest PG&E NSC Rate from PDF: ${nsc_rate:.5f}/kWh")
-            else:
-                print(f"  > Retaining Verified Fallback NSC Rate: ${nsc_rate:.5f}/kWh")
-        else:
-            print(f"  [Warning] HTTP {res.status_code} fetching NSC PDF. Retaining fallback.")
-    except Exception as e:
-        print(f"  [Warning] Failed to fetch/parse NSC PDF ({e}). Retaining fallback.")
-
-    return {
-        "nscRate": nsc_rate,
-        "sbpExportRate": sbp_export_rate
-    }
     
 def main():
     parser = argparse.ArgumentParser()
@@ -264,6 +265,7 @@ def main():
     try:
         new_data, b_credit, new_allowances = parse_pge_xlsx(tmp_xlsx)
         new_data = cleanup_bins(new_data)
+        solar_rates = fetch_pge_solar_clawback_rates()
     except Exception as e:
         print(f"[Error] Parser Failure: {e}")
         if os.path.exists(tmp_xlsx): os.remove(tmp_xlsx)
@@ -276,7 +278,7 @@ def main():
     with open(JSON_FILE, 'r') as f:
         current_json = json.load(f)
 
-    print("\n[Comparison Ledger: JSON vs Excel]")
+    print("\n[Comparison Ledger: JSON vs Source]")
     updated = False
     
     # 1. Update Global Baseline Credit
@@ -287,7 +289,26 @@ def main():
             if not args.dry_run: current_json["baselineCredit"] = b_credit
             updated = True
 
-    # 2. Update Baseline Allowances Table
+    # 2. Update Solar Claw-Back & NSC Rates
+    if "nscRate" in solar_rates:
+        curr_nsc = current_json.get("nscRate", 0.0)
+        diff = abs(solar_rates["nscRate"] - curr_nsc)
+        status = "[MATCH]" if diff < 0.0001 else "[CHANGE]"
+        print(f"  {status} Net Surplus Compensation (NSC): JSON=${curr_nsc:.5f} | Source=${solar_rates['nscRate']:.5f}/kWh")
+        if diff > 0.0001:
+            if not args.dry_run: current_json["nscRate"] = solar_rates["nscRate"]
+            updated = True
+
+    if "sbpExportRate" in solar_rates:
+        curr_sbp = current_json.get("sbpExportRate", 0.0)
+        diff = abs(solar_rates["sbpExportRate"] - curr_sbp)
+        status = "[MATCH]" if diff < 0.0001 else "[CHANGE]"
+        print(f"  {status} SBP Avoided Cost Export Rate: JSON=${curr_sbp:.5f} | Source=${solar_rates['sbpExportRate']:.5f}/kWh")
+        if diff > 0.0001:
+            if not args.dry_run: current_json["sbpExportRate"] = solar_rates["sbpExportRate"]
+            updated = True
+
+    # 3. Update Baseline Allowances Table
     if new_allowances:
         if "baselineAllowances" not in current_json:
             current_json["baselineAllowances"] = {}
@@ -309,11 +330,10 @@ def main():
                                     current_json["baselineAllowances"][t][season][code] = val
                                 updated = True
 
-    # 3. Update Plan Rates (Safe initialization prevents KeyError)
+    # 4. Update Plan Rates (Safe initialization prevents KeyError on new/unlisted plans)
     for plan in ["E-1 tiered", "E-TOU-C", "E-TOU-D", "E-ELEC", "EV2-A", "EV-B"]:
         if plan not in new_data: continue
         
-        # Ensure plan exists in target JSON
         if "plans" not in current_json:
             current_json["plans"] = {}
         if plan not in current_json["plans"]:

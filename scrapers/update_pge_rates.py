@@ -8,7 +8,9 @@ from datetime import datetime
 
 # --- CONFIGURATION ---
 XLSX_URL = "https://www.pge.com/assets/rates/tariffs/res-inclu-tou-current.xlsx"
-JSON_FILE = "pge_rates.json"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+JSON_FILE = os.path.normpath(os.path.join(ROOT_DIR, "rates", "pge_rates.json"))
 
 def download_xlsx(url, save_path):
     print(f"[Network] Downloading XLSX from: {url}")
@@ -212,7 +214,7 @@ def main():
 
     if args.dry_run: print("\n!!! DRY RUN MODE: No files will be modified !!!")
 
-    tmp_xlsx = "pge_temp.xlsx"
+    tmp_xlsx = os.path.join(SCRIPT_DIR, "pge_temp.xlsx")
     download_xlsx(XLSX_URL, tmp_xlsx)
     
     try:

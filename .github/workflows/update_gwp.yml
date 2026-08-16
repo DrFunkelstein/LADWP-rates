@@ -31,13 +31,13 @@ jobs:
 
       - name: Run Scraper
         run: |
-          python update_gwp_rates.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+          python scrapers/update_gwp_rates.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
 
       - name: Commit and Push Changes
         if: github.event.inputs.dry_run != 'true'
         run: |
           git config --global user.name 'GWP-Bot'
           git config --global user.email 'bot@utilityestimator.com'
-          git add gwp_rates.json
+          git add rates/gwp_rates.json
           git commit -m "Automated GWP rate update: $(date)" || exit 0
           git push

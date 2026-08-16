@@ -32,7 +32,7 @@ jobs:
       - name: Run Scraper
         # Passes --dry-run to the script if the checkbox is checked
         run: |
-          python update_rates.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+          python scrapers/update_rates.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
 
       - name: Commit and Push Changes
         # This step is skipped entirely if dry_run is true
@@ -40,7 +40,7 @@ jobs:
         run: |
           git config --global user.name 'LADWP-Bot'
           git config --global user.email 'bot@utilityestimator.com'
-          git add ladwp_rates.json
+          git add rates/ladwp_rates.json
           # Commit only if there are changes; '|| exit 0' prevents failure if no changes
           git commit -m "Automated rate update: $(date)" || exit 0
           git push

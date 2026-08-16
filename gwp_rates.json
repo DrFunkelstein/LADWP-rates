@@ -1,0 +1,45 @@
+{
+  "lastUpdated": "2026-08-15",
+  "utility": "GWP",
+  "electric": {
+    "dailyCustomerCharge": 0.75,
+    "taxRate": 0.070,
+    "highSeasonMonths": [7, 8, 9, 10],
+    "standard": {
+      "tier1DailyKwh": 10.0,
+      "tier2DailyKwh": 10.0,
+      "highSeason": {
+        "tier1": 0.3071,
+        "tier2": 0.3806,
+        "tier3": 0.4547
+      },
+      "lowSeason": {
+        "tier1": 0.2575,
+        "tier2": 0.3189,
+        "tier3": 0.3935
+      }
+    },
+    "tou": {
+      "highSeason": {
+        "peak": 0.6839,
+        "offPeak": 0.2280
+      },
+      "lowSeason": {
+        "peak": 0.5700,
+        "offPeak": 0.1901
+      }
+    }
+  },
+  "water": {
+    "dailyCustomerCharge": 0.881,
+    "limits": {
+      "tier1": 8.0,
+      "tier2": 15.0
+    },
+    "rates": {
+      "tier1": 2.80,
+      "tier2": 4.11,
+      "tier3": 4.28
+    }
+  }
+}

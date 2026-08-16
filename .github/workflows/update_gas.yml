@@ -27,13 +27,13 @@ jobs:
 
       - name: Run Scraper
         # This will turn RED and email you if it finds 0 rates (Structural Failure)
-        run: python update_gas.py
+        run: python scrapers/update_gas.py
 
       - name: Commit and Push Changes
         run: |
           git config --global user.name 'GasBot'
           git config --global user.email 'bot@utilityestimator.com'
-          git add socalgas_rates.json
+          git add rates/socalgas_rates.json
           
           # Only commit if the scraper actually found a new number
           if git diff --staged --quiet; then

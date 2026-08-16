@@ -37,6 +37,8 @@ jobs:
           git config --global user.name 'SCE-Manual-Bot'
           git config --global user.email 'bot@utility.com'
           git add rates/sce_rates.json
+          cp rates/sce_rates.json sce_rates.json || true
+          git add sce_rates.json
           git rm upload_folders/sce_uploads/*.pdf || echo "No files to remove"
           git commit -m "Updated SCE rates from manual PDF upload" || exit 0
           git push

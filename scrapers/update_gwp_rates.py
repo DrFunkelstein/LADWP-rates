@@ -14,7 +14,9 @@ import requests
 from bs4 import BeautifulSoup
 
 URL = "https://www.glendaleca.gov/government/departments/glendale-water-and-power/rates/residential-electric-rates"
-OUTPUT_FILE = "gwp_rates.json"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+OUTPUT_FILE = os.path.normpath(os.path.join(ROOT_DIR, "rates", "gwp_rates.json"))
 
 
 def parse_args():

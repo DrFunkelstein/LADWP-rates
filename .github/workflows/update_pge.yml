@@ -12,7 +12,7 @@ on:
   # Trigger when a PDF is committed to the uploads folder
   push:
     paths:
-      - 'pge_uploads/**.pdf'
+      - 'upload_folders/pge_uploads/**.pdf'
 
 jobs:
   build:
@@ -32,17 +32,17 @@ jobs:
           pip install requests pandas openpyxl pdfplumber beautifulsoup4
 
       - name: Run Automated Scraper
-        run: python update_pge_rates.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+        run: python scrapers/update_pge_rates.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
 
       - name: Run Manual PDF Parser
         # This overwrites web data with the high-precision PDF data
-        run: python parse_pge_manual.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+        run: python parsers/parse_pge_manual.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
 
       - name: Commit and Push
         if: github.event.inputs.dry_run != 'true'
         run: |
           git config --global user.name 'PGE-Bot'
           git config --global user.email 'bot@meterwise.pro'
-          git add pge_rates.json
+          git add rates/pge_rates.json
           git commit -m "PG&E rate update: $(date)" || exit 0
           git push

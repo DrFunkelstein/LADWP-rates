@@ -41,6 +41,8 @@ jobs:
           git config --global user.name 'LADWP-Bot'
           git config --global user.email 'bot@utilityestimator.com'
           git add rates/ladwp_rates.json
+          cp rates/ladwp_rates.json ladwp_rates.json || true
+          git add ladwp_rates.json
           # Commit only if there are changes; '|| exit 0' prevents failure if no changes
           git commit -m "Automated rate update: $(date)" || exit 0
           git push

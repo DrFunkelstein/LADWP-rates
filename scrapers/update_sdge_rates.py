@@ -40,50 +40,82 @@ def extract_cents(text):
 
 def fetch_sdge_nsc_rate():
     """
-    Scrapes the 'True-Up Monthly Rate Table' on SDG&E's Excess Generation page
-    to extract the latest Net Surplus Compensation (NSC) rate.
+    Parses SDG&E's True-Up Monthly Rate Table matrix (Months x Years)
+    to extract the current month's Net Surplus Compensation (NSC) rate.
     """
     print("\n[Solar Scan] Checking SDG&E True-Up Excess Generation Table...")
     
-    nsc_rate = 0.01170 # Verified fallback
+    nsc_rate = 0.01306  # Verified default
+    now = datetime.now()
+    current_year_str = str(now.year)
+    current_month_name = now.strftime("%B") # e.g. "August"
+    short_month_name = now.strftime("%b")   # e.g. "Aug"
     
     try:
         res = requests.get(EXCESS_GEN_URL, headers=HEADERS, timeout=15)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
-            table = soup.find('table')
+            tables = soup.find_all('table')
             
-            if table:
-                # Find all rate cells inside table body
-                cells = table.find_all('td')
-                rates_found = []
-                for c in cells:
-                    txt = c.get_text().strip()
-                    # Check for $/kWh decimal e.g. $0.01170 or 0.01170
-                    m = re.search(r"\$?0\.0\d{3,5}", txt)
-                    if m:
-                        val = float(m.group(0).replace("$", ""))
-                        if val > 0.001:
-                            rates_found.append(val)
+            target_table = None
+            for t in tables:
+                txt = t.get_text()
+                if "January" in txt or "Jan" in txt:
+                    target_table = t
+                    break
+            
+            if target_table:
+                # 1. Map column indices from header
+                headers = [th.get_text().strip() for th in target_table.find_all(['th', 'td'])]
+                year_col_idx = 1 # Default to first data column (latest year)
                 
-                if rates_found:
-                    # Most recent rate is the latest cell entry
-                    nsc_rate = rates_found[-1]
-                    print(f"  > Parsed Latest SDG&E NSC Rate from Table: ${nsc_rate:.5f}/kWh")
-                else:
+                # Check if columns have year headers (e.g. 2026, 2025)
+                header_row = target_table.find('tr')
+                if header_row:
+                    cols = [c.get_text().strip() for c in header_row.find_all(['th', 'td'])]
+                    for idx, c in enumerate(cols):
+                        if current_year_str in c:
+                            year_col_idx = idx
+                            break
+
+                # 2. Find row for current month (or newest populated month)
+                rows = target_table.find_all('tr')
+                month_names = [
+                    "January", "February", "March", "April", "May", "June",
+                    "July", "August", "September", "October", "November", "December"
+                ]
+                
+                # Search backward from current month to find latest published rate
+                current_month_idx = now.month - 1
+                found_rate = None
+                
+                for m_idx in range(current_month_idx, -1, -1):
+                    target_m = month_names[m_idx]
+                    for r in rows:
+                        row_txt = r.get_text()
+                        if target_m in row_txt or target_m[:3] in row_txt:
+                            cells = r.find_all('td')
+                            if len(cells) > year_col_idx:
+                                val_str = cells[year_col_idx].get_text().strip()
+                                m_match = re.search(r"(\d+\.\d+)", val_str)
+                                if m_match:
+                                    extracted = float(m_match.group(1))
+                                    # Handle whether it is in cents (1.306¢) or dollars ($0.01306)
+                                    val = extracted / 100 if extracted > 0.5 else extracted
+                                    if val > 0.001:
+                                        found_rate = val
+                                        print(f"  > Parsed SDG&E NSC Rate for {target_m} {current_year_str}: ${val:.5f}/kWh")
+                                        break
+                    if found_rate:
+                        nsc_rate = found_rate
+                        break
+                        
+                if not found_rate:
                     print(f"  > Retaining Verified Fallback NSC Rate: ${nsc_rate:.5f}/kWh")
             else:
-                # Fallback text regex scan across page
-                matches = re.findall(r"\$?0\.0\d{3,5}", res.text)
-                if matches:
-                    cleaned = [float(m.replace("$", "")) for m in matches if float(m.replace("$", "")) > 0.005]
-                    if cleaned:
-                        nsc_rate = cleaned[-1]
-                        print(f"  > Parsed SDG&E NSC Rate from Page Text: ${nsc_rate:.5f}/kWh")
-                else:
-                    print(f"  > Retaining Verified Fallback NSC Rate: ${nsc_rate:.5f}/kWh")
+                print(f"  [Warning] Table not found on page. Retaining fallback: ${nsc_rate:.5f}/kWh")
         else:
-            print(f"  [Warning] HTTP {res.status_code} from Excess Gen URL. Retaining fallback.")
+            print(f"  [Warning] HTTP {res.status_code}. Retaining fallback: ${nsc_rate:.5f}/kWh")
     except Exception as e:
         print(f"  [Warning] Excess Generation fetch skipped ({e}). Retaining fallback.")
         

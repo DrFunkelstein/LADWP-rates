@@ -25,9 +25,9 @@ jobs:
         # Pass the choice to the Python script
         run: |
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            python parse_sce_manual.py --dry-run
+            python parsers/parse_sce_manual.py --dry-run
           else
-            python parse_sce_manual.py
+            python parsers/parse_sce_manual.py
           fi
 
       - name: Commit and Clean Up
@@ -36,7 +36,7 @@ jobs:
         run: |
           git config --global user.name 'SCE-Manual-Bot'
           git config --global user.email 'bot@utility.com'
-          git add sce_rates.json
-          git rm sce_uploads/*.pdf || echo "No files to remove"
+          git add rates/sce_rates.json
+          git rm upload_folders/sce_uploads/*.pdf || echo "No files to remove"
           git commit -m "Updated SCE rates from manual PDF upload" || exit 0
           git push

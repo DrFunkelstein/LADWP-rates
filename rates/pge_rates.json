@@ -1,41 +1,138 @@
 {
-  "lastUpdated": "2026-08-15",
+  "lastUpdated": "2026-08-16 05:47",
   "nbcRate": 0.02154,
-  "baselineCredit": 0.09321,
-  "sbpExportRate": 0.07500,
-  "nscRate": 0.03200,
+  "baselineCredit": 0.0814,
+  "sbpExportRate": 0.075,
+  "nscRate": 0.032,
   "baselineAllowances": {
-    "T": { "summer": { "basic": 7.0, "allElectric": 8.8 }, "winter": { "basic": 7.7, "allElectric": 18.2 } },
-    "P": { "summer": { "basic": 13.5, "allElectric": 15.2 }, "winter": { "basic": 11.0, "allElectric": 26.0 } },
-    "R": { "summer": { "basic": 18.1, "allElectric": 22.1 }, "winter": { "basic": 11.0, "allElectric": 28.5 } },
-    "S": { "summer": { "basic": 16.5, "allElectric": 18.8 }, "winter": { "basic": 12.3, "allElectric": 32.1 } },
-    "X": { "summer": { "basic": 10.1, "allElectric": 11.5 }, "winter": { "basic": 11.0, "allElectric": 20.2 } }
+    "T": {
+      "summer": {
+        "basic": 6.5,
+        "allElectric": 7.1
+      },
+      "winter": {
+        "basic": 7.5,
+        "allElectric": 12.9
+      }
+    },
+    "P": {
+      "summer": {
+        "basic": 13.5,
+        "allElectric": 15.2
+      },
+      "winter": {
+        "basic": 11.0,
+        "allElectric": 26.0
+      }
+    },
+    "R": {
+      "summer": {
+        "basic": 17.7,
+        "allElectric": 19.9
+      },
+      "winter": {
+        "basic": 10.4,
+        "allElectric": 26.7
+      }
+    },
+    "S": {
+      "summer": {
+        "basic": 15.0,
+        "allElectric": 17.8
+      },
+      "winter": {
+        "basic": 10.2,
+        "allElectric": 23.7
+      }
+    },
+    "X": {
+      "summer": {
+        "basic": 9.8,
+        "allElectric": 8.5
+      },
+      "winter": {
+        "basic": 9.7,
+        "allElectric": 14.6
+      }
+    }
   },
   "plans": {
     "E-TOU-C": {
-      "summer": { "onPeak": 0.55123, "offPeak": 0.44312 },
-      "winter": { "onPeak": 0.45123, "offPeak": 0.40312 }
+      "summer": {
+        "onPeak": 0.5224,
+        "offPeak": 0.3994
+      },
+      "winter": {
+        "onPeak": 0.39757,
+        "offPeak": 0.36757
+      }
     },
     "E-TOU-D": {
-      "summer": { "onPeak": 0.58443, "offPeak": 0.42110 },
-      "winter": { "onPeak": 0.48220, "offPeak": 0.39110 }
+      "summer": {
+        "onPeak": 0.47708,
+        "offPeak": 0.34212
+      },
+      "winter": {
+        "onPeak": 0.38747,
+        "offPeak": 0.34886
+      }
     },
     "E-ELEC": {
-      "summer": { "onPeak": 0.58210, "offPeak": 0.41220, "superOffPeak": 0.26315 },
-      "winter": { "onPeak": 0.48110, "offPeak": 0.38220, "superOffPeak": 0.24110 }
+      "summer": {
+        "onPeak": 0.55214,
+        "offPeak": 0.39026,
+        "superOffPeak": 0.33358
+      },
+      "winter": {
+        "onPeak": 0.32063,
+        "offPeak": 0.29854,
+        "superOffPeak": 0.28468
+      }
     },
     "EV2-A": {
-      "summer": { "onPeak": 0.62143, "offPeak": 0.45120, "superOffPeak": 0.28442 },
-      "winter": { "onPeak": 0.52110, "offPeak": 0.41220, "superOffPeak": 0.25441 }
+      "summer": {
+        "onPeak": 0.53809,
+        "offPeak": 0.4276,
+        "superOffPeak": 0.22558
+      },
+      "winter": {
+        "onPeak": 0.41099,
+        "offPeak": 0.39428,
+        "superOffPeak": 0.22558
+      }
     },
     "E-1 tiered": {
-      "summer": { "onPeak": 0.42150, "offPeak": 0.52840 },
-      "winter": { "onPeak": 0.39120, "offPeak": 0.49330 }
+      "summer": {
+        "onPeak": 0.40702,
+        "offPeak": 0.32561
+      },
+      "winter": {
+        "onPeak": 0.40702,
+        "offPeak": 0.32561
+      }
+    },
+    "EV-B": {
+      "summer": {
+        "onPeak": 0.62131,
+        "offPeak": 0.3772,
+        "superOffPeak": 0.26465
+      },
+      "winter": {
+        "onPeak": 0.43877999999999995,
+        "offPeak": 0.30677,
+        "superOffPeak": 0.23503999999999997
+      }
     }
   },
   "gas": {
     "procurement": 0.48122,
-    "transportation": { "tier1": 1.05432, "tier2": 1.58211 },
-    "allowances": { "winter": 1.85, "summer": 0.45 }
+    "transportation": {
+      "tier1": 1.05432,
+      "tier2": 1.58211
+    },
+    "allowances": {
+      "winter": 1.85,
+      "summer": 0.45
+    }
   }
 }

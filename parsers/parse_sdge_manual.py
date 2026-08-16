@@ -5,9 +5,11 @@ import sys
 import pdfplumber
 from datetime import datetime
 
-# --- CONFIGURATION ---
-UPLOAD_DIR = "sdge_uploads"
-JSON_FILE = "sdge_rates.json"
+# --- RESOLVE NESTED DIRECTORY PATHS ---
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+UPLOAD_DIR = os.path.normpath(os.path.join(ROOT_DIR, "upload_folders", "sdge_uploads"))
+JSON_FILE = os.path.normpath(os.path.join(ROOT_DIR, "rates", "sdge_rates.json"))
 
 def extract_decimal(text):
     if not text: return 0.0
@@ -27,90 +29,108 @@ def parse_sdge_pdf(pdf_path):
         "winter": {"on": None, "mid": None, "off": None},
         "baseline_credit": None,
         "service_charge": None,
-        "service_charge_reduced": None 
+        "service_charge_reduced": None,
+        "nsc_rate": None,
+        "sbp_export_rate": None,
+        "sbp_delivery_export": None,
+        "sbp_generation_export": None
     }
 
     with pdfplumber.open(pdf_path) as pdf:
-        page = pdf.pages[0]
-        full_text = page.extract_text()
-        
-        # 1. Identify Plan ID
-        plan_match = re.search(r"Schedule\s+([A-Z0-9-]+)", full_text)
-        if plan_match:
-            results["plan_id"] = plan_match.group(1)
-            if results["plan_id"] == "DR": results["is_tiered"] = True
-            print(f"  > Target Plan: {results['plan_id']}")
+        for page_idx, page in enumerate(pdf.pages):
+            full_text = page.extract_text() or ""
+            if not full_text: continue
 
-        # 2. Block-Aware Parsing
-        lines = full_text.split('\n')
-        current_season = None
+            # 1. Identify Plan ID (first page)
+            if page_idx == 0:
+                plan_match = re.search(r"Schedule\s+([A-Z0-9-]+)", full_text)
+                if plan_match:
+                    results["plan_id"] = plan_match.group(1)
+                    if results["plan_id"] == "DR": results["is_tiered"] = True
+                    print(f"  > Target Plan: {results['plan_id']}")
 
-        for line in lines:
-            line_clean = line.strip()
-            if not line_clean: continue
+            lines = full_text.split('\n')
+            current_season = None
 
-            # Track Season context
-            if "Summer" in line_clean: current_season = "summer"
-            elif "Winter" in line_clean: current_season = "winter"
+            for line in lines:
+                line_clean = line.strip()
+                if not line_clean: continue
+                line_upper = line_clean.upper()
 
-            if current_season:
-                # Find all 5-decimal numbers on the line
-                # On SDGE sheets, the Totals are always at the very end of the list
-                decimals = re.findall(r"\d+\.\d{5}", line_clean)
-                
-                if decimals:
-                    # CASE A: Standard DR (Tiered) - Look for 2 tiers
-                    if results["is_tiered"]:
-                        if "Tier 1" in line_clean or "Up to" in line_clean:
+                # Track Season context
+                if "Summer" in line_clean: current_season = "summer"
+                elif "Winter" in line_clean: current_season = "winter"
+
+                # 2. Solar SBP & NSC Detection
+                if any(k in line_upper for k in ["NET SURPLUS COMPENSATION", "NSC RATE", "SURPLUS COMPENSATION"]):
+                    decimals = re.findall(r"\d+\.\d{4,5}", line_clean)
+                    if decimals:
+                        results["nsc_rate"] = float(decimals[-1])
+                        print(f"    [Extracted] Net Surplus Compensation: ${results['nsc_rate']:.5f}/kWh")
+
+                if "DELIVERY EXPORT" in line_upper:
+                    decimals = re.findall(r"\d+\.\d{4,5}", line_clean)
+                    if decimals:
+                        results["sbp_delivery_export"] = float(decimals[-1])
+                        print(f"    [Extracted] SBP Delivery Export Rate: ${results['sbp_delivery_export']:.5f}/kWh")
+
+                if "GENERATION EXPORT" in line_upper:
+                    decimals = re.findall(r"\d+\.\d{4,5}", line_clean)
+                    if decimals:
+                        results["sbp_generation_export"] = float(decimals[-1])
+                        print(f"    [Extracted] SBP Generation Export Rate: ${results['sbp_generation_export']:.5f}/kWh")
+
+                if current_season:
+                    decimals = re.findall(r"\d+\.\d{5}", line_clean)
+                    if decimals:
+                        # Standard DR (Tiered)
+                        if results["is_tiered"]:
+                            if "Tier 1" in line_clean or "Up to" in line_clean:
+                                results[current_season]["on"] = float(decimals[-1])
+                                print(f"    [Extracted] {current_season} Tier 1: {decimals[-1]}")
+                            elif "Tier 2" in line_clean or "Above" in line_clean:
+                                val = float(decimals[-1])
+                                results[current_season]["mid"] = val
+                                results[current_season]["off"] = val
+                                print(f"    [Extracted] {current_season} Tier 2: {val}")
+                        
+                        # TOU 3-bin block
+                        elif "On-Peak" in line_clean and "Super Off-Peak" in line_clean:
+                            if len(decimals) >= 3:
+                                results[current_season]["on"] = float(decimals[-3])
+                                results[current_season]["mid"] = float(decimals[-2])
+                                results[current_season]["off"] = float(decimals[-1])
+                                print(f"    [Extracted] {current_season} Block: On:{decimals[-3]} Mid:{decimals[-2]} Off:{decimals[-1]}")
+                        
+                        # TOU Individual lines
+                        elif "On-Peak" in line_clean:
                             results[current_season]["on"] = float(decimals[-1])
-                            print(f"    [Extracted] {current_season} Tier 1: {decimals[-1]}")
-                        elif "Tier 2" in line_clean or "Above" in line_clean:
-                            val = float(decimals[-1])
-                            results[current_season]["mid"] = val
-                            results[current_season]["off"] = val
-                            print(f"    [Extracted] {current_season} Tier 2: {val}")
-                    
-                    # CASE B: TOU Plans - Look for 3-bin block
-                    # In your text dump, On, Off, and Super-Off totals appear together at the end
-                    elif "On-Peak" in line_clean and "Super Off-Peak" in line_clean:
-                        if len(decimals) >= 3:
-                            # Mapping based on your text dump order (On, Off, Super)
-                            results[current_season]["on"] = float(decimals[-3])
-                            results[current_season]["mid"] = float(decimals[-2])
+                            print(f"    [Extracted] {current_season} On-Peak: {decimals[-1]}")
+                        elif "Super Off-Peak" in line_clean:
                             results[current_season]["off"] = float(decimals[-1])
-                            print(f"    [Extracted] {current_season} Block: On:{decimals[-3]} Mid:{decimals[-2]} Off:{decimals[-1]}")
-                    
-                    # CASE C: TOU Individual lines (fallback if not blocked)
-                    elif "On-Peak" in line_clean:
-                        results[current_season]["on"] = float(decimals[-1])
-                        print(f"    [Extracted] {current_season} On-Peak: {decimals[-1]}")
-                    elif "Super Off-Peak" in line_clean:
-                        results[current_season]["off"] = float(decimals[-1])
-                        print(f"    [Extracted] {current_season} Super Off-Peak: {decimals[-1]}")
-                    elif "Off-Peak" in line_clean:
-                        results[current_season]["mid"] = float(decimals[-1])
-                        print(f"    [Extracted] {current_season} Off-Peak: {decimals[-1]}")
+                            print(f"    [Extracted] {current_season} Super Off-Peak: {decimals[-1]}")
+                        elif "Off-Peak" in line_clean:
+                            results[current_season]["mid"] = float(decimals[-1])
+                            print(f"    [Extracted] {current_season} Off-Peak: {decimals[-1]}")
 
-            # 3. FIXED CHARGE LOGIC (Updated for Reduced Rates)
-            if "Base Services Charge" in line_clean:
-                # Find the rate at the end of the line
-                decimals = re.findall(r"\d+\.\d{5}", line_clean)
-                if decimals:
-                    val = float(decimals[-1])
-                    if "DRAH" in line_clean or "FERA" in line_clean:
-                        results["service_charge_reduced"] = val
-                        print(f"    [Extracted] Reduced Svc Charge: {val}")
-                    else:
-                        results["service_charge"] = val
-                        print(f"    [Extracted] Standard Svc Charge: {val}")
+                # 3. Base Services / Fixed Charges
+                if "Base Services Charge" in line_clean:
+                    decimals = re.findall(r"\d+\.\d{5}", line_clean)
+                    if decimals:
+                        val = float(decimals[-1])
+                        if "DRAH" in line_clean or "FERA" in line_clean:
+                            results["service_charge_reduced"] = val
+                            print(f"    [Extracted] Reduced Svc Charge: {val}")
+                        else:
+                            results["service_charge"] = val
+                            print(f"    [Extracted] Standard Svc Charge: {val}")
 
-            # 4. BASELINE CREDIT
-            if "Baseline Adjustment Credit" in line_clean:
-                # Capture values in parentheses like (0.10892)
-                credit_match = re.findall(r"\(?\d+\.\d{5}\)?", line_clean)
-                if credit_match:
-                    results["baseline_credit"] = abs(extract_decimal(credit_match[-1]))
-                    print(f"    [Extracted] Baseline Credit: {results['baseline_credit']}")
+                # 4. Baseline Adjustment Credit
+                if "Baseline Adjustment Credit" in line_clean:
+                    credit_match = re.findall(r"\(?\d+\.\d{5}\)?", line_clean)
+                    if credit_match:
+                        results["baseline_credit"] = abs(extract_decimal(credit_match[-1]))
+                        print(f"    [Extracted] Baseline Credit: {results['baseline_credit']}")
 
     return results
 
@@ -118,20 +138,51 @@ def main():
     dry_run = "--dry-run" in sys.argv
     if dry_run: print("!!! DRY RUN MODE ACTIVE !!!")
 
-    if not os.path.exists(UPLOAD_DIR): return
+    if not os.path.exists(UPLOAD_DIR):
+        os.makedirs(UPLOAD_DIR)
+        print(f"Created upload directory: {UPLOAD_DIR}")
+
+    if not os.path.exists(JSON_FILE):
+        print(f"[Error] {JSON_FILE} not found.")
+        sys.exit(1)
 
     try:
         with open(JSON_FILE, 'r') as f:
             data = json.load(f)
-    except:
+    except Exception as e:
+        print(f"[Error] Failed to load JSON: {e}")
         sys.exit(1)
 
     overall_updated = False
     
-    for filename in os.listdir(UPLOAD_DIR):
-        if not filename.lower().endswith(".pdf"): continue
+    files = [f for f in os.listdir(UPLOAD_DIR) if f.lower().endswith(".pdf")]
+    if not files:
+        print(f"No PDF files found in {UPLOAD_DIR}.")
+        sys.exit(0)
+
+    for filename in files:
         pdf_data = parse_sdge_pdf(os.path.join(UPLOAD_DIR, filename))
         
+        # 1. Update Global Solar Rates if captured in PDF
+        def update_global_val(key, current_val, new_val):
+            nonlocal overall_updated
+            if new_val is not None and new_val > 0.0 and abs(new_val - (current_val or 0.0)) > 0.00001:
+                print(f"    [CHANGE] Global {key}: {current_val} -> {new_val}")
+                overall_updated = True
+                return new_val
+            return current_val
+
+        data["nscRate"] = update_global_val("nscRate", data.get("nscRate", 0.01306), pdf_data["nsc_rate"])
+        data["sbpDeliveryExportRate"] = update_global_val("sbpDeliveryExportRate", data.get("sbpDeliveryExportRate", 0.02548), pdf_data["sbp_delivery_export"])
+        data["sbpGenerationExportRate"] = update_global_val("sbpGenerationExportRate", data.get("sbpGenerationExportRate", 0.09065), pdf_data["sbp_generation_export"])
+        
+        # Auto-compute total SBP Export Rate
+        tot_sbp = round(data.get("sbpDeliveryExportRate", 0.02548) + data.get("sbpGenerationExportRate", 0.09065), 5)
+        if abs(data.get("sbpExportRate", 0.0) - tot_sbp) > 0.00001:
+            data["sbpExportRate"] = tot_sbp
+            overall_updated = True
+
+        # 2. Update Plan Rates
         raw_id = pdf_data["plan_id"]
         if not raw_id: continue
         plan_key = "Standard DR" if raw_id == "DR" else raw_id
@@ -147,7 +198,6 @@ def main():
                 return new_val
             return current_val
 
-        # Map to JSON slots
         p["dailyServiceCharge"] = update_val("Fixed", "Std Svc Charge", p.get("dailyServiceCharge"), pdf_data["service_charge"])
         p["dailyServiceChargeLowIncome"] = update_val("Fixed", "Reduced Svc Charge", p.get("dailyServiceChargeLowIncome"), pdf_data["service_charge_reduced"])
 
@@ -164,7 +214,7 @@ def main():
             data["lastUpdated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
             with open(JSON_FILE, 'w') as f:
                 json.dump(data, f, indent=2)
-            print("\n>>> Success: JSON updated.")
+            print(f"\n>>> Success: {RATES_FILE if 'RATES_FILE' in locals() else JSON_FILE} updated.")
         else:
             print("\n>>> Dry Run Complete: Changes detected but not saved.")
     else:

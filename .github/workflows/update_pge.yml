@@ -44,5 +44,7 @@ jobs:
           git config --global user.name 'PGE-Bot'
           git config --global user.email 'bot@meterwise.pro'
           git add rates/pge_rates.json
+          cp rates/pge_rates.json pge_rates.json || true
+          git add pge_rates.json
           git commit -m "PG&E rate update: $(date)" || exit 0
           git push

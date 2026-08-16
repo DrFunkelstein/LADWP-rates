@@ -14,14 +14,27 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 
+# --- RESOLVE PATHS DYNAMICALLY ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
 OUTPUT_FILE = os.path.normpath(os.path.join(ROOT_DIR, "rates", "pwp_rates.json"))
 URL = "https://pwp.cityofpasadena.net/water-and-electric-rates/"
 
+
 def log(msg: str, verbose: bool = True):
     if verbose:
         print(f"[*] {msg}")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="PWP Rate Scraper")
+    parser.add_argument("--dry-run", action="store_true", help="Scrape and display diffs without writing to disk")
+    parser.add_argument("--verbose", action="store_true", help="Print verbose step-by-step parsing logs")
+    return parser.parse_args()
+
+
+def fetch_html(verbose: bool) -> str:
+    log(f"Fetching HTML from: {URL}", verbose)
     
     session = requests.Session()
     headers = {

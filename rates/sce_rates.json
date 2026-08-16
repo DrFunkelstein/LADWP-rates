@@ -1,0 +1,28 @@
+{
+  "lastUpdated": "2026-04-24",
+  "fixed": {
+    "dailyCharge": 0.031,
+    "minBill": 0.35,
+    "nbcRate": 0.028,
+    "baselineCredit": 0.10108,
+    "climateCredit": 86.00
+  },
+  "plans": {
+    "Domestic": {
+      "summer": { "tier1": 0.30243, "tier2": 0.40351 },
+      "winter": { "tier1": 0.30243, "tier2": 0.40351 }
+    },
+    "TOU-D-4": {
+      "summer": { "onPeak": 0.58530, "midPeak": 0.46523, "offPeak": 0.34698 },
+      "winter": { "onPeak": 0.51159, "midPeak": 0.51159, "offPeak": 0.37550, "superOffPeak": 0.33636 }
+    },
+    "TOU-D-5": {
+      "summer": { "onPeak": 0.74447, "midPeak": 0.54412, "offPeak": 0.34562 },
+      "winter": { "onPeak": 0.60860, "midPeak": 0.60860, "offPeak": 0.38232, "superOffPeak": 0.32575 }
+    },
+    "TOU-D-PRIME": {
+      "summer": { "onPeak": 0.59225, "midPeak": 0.40116, "offPeak": 0.26786 },
+      "winter": { "onPeak": 0.56580, "midPeak": 0.56580, "offPeak": 0.24743 }
+    }
+  }
+}

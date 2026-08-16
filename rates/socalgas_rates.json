@@ -1,0 +1,29 @@
+{
+  "lastUpdated": "2026-08-02 12:52",
+  "procurement": 0.16863,
+  "transportation": {
+    "base": 1.11939,
+    "over": 1.6127
+  },
+  "fixed": {
+    "customerCharge": 0.16438,
+    "ppps": 0.11301,
+    "regulatory": 0.0035,
+    "franchise": 0.035
+  },
+  "allowances": {
+    "zone1": {
+      "winter": 0.521,
+      "summer": 0.493
+    },
+    "zone2": {
+      "winter": 0.634,
+      "summer": 0.512
+    },
+    "zone3": {
+      "winter": 0.822,
+      "summer": 0.584
+    }
+  },
+  "climateCredit": 58.33
+}

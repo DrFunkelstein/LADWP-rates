@@ -6,6 +6,12 @@ import sys
 import io
 from datetime import datetime
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+OUTPUT_FILE = os.path.normpath(os.path.join(ROOT_DIR, "rates", "socalgas_rates.json"))
+
 PROCUREMENT_URL = "https://www.socalgas.com/business/energy-market-services/gas-prices"
 PDF_URL = "https://www.socalgas.com/regulatory/documents/TariffBookUpdate.pdf"
 

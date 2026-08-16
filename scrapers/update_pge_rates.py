@@ -185,23 +185,22 @@ def parse_pge_xlsx(file_path):
             row_str = " ".join([str(i) for i in row.dropna().tolist()])
             row_upper = row_str.upper()
 
-            # --- 1. Fixed & Meter Charge Extraction ---
-            # Check for EV-B dedicated meter charge ($ per meter per day)
-            if "EV, RATE B" in row_upper or "EV-B" in row_upper or current_plan_id == "EV-B":
-                if "METER CHARGE" in row_upper or "CUSTOMER CHARGE" in row_upper:
+            # --- 1. Targeted Fixed & Meter Charge Extraction ---
+            # Dedicated EV-B Meter Charge (Only match explicit meter charge line item)
+            if "EV, RATE B" in row_upper or "EV-B" in row_upper:
+                if ("METER CHARGE" in row_upper or "CUSTOMER CHARGE" in row_upper) and not any(p in row_upper for p in ["PEAK", "OFF-PEAK", "TIER"]):
                     for c in row:
                         val = clean_val(c)
-                        if 0.10 <= val <= 2.00:
+                        # Meter charge is typically ~$0.413/day
+                        if 0.10 <= val <= 1.50:
                             fixed_fees["evbMeterCharge"] = val
                             print(f"    [Captured] EV-B Dedicated Meter Charge: ${val:.5f}/day")
                             break
 
-            # Check for Base Services Charge row
-            if "BASE SERVICE" in row_upper or "SERVICE CHARGE" in row_upper:
-                # Extract any positive values in the row
+            # Explicit Base Services Charge rows (Ignore plan titles / volumetric table rows)
+            if ("BASE SERVICE CHARGE" in row_upper or "BASE SERVICES CHARGE" in row_upper) and not any(p in row_upper for p in ["PEAK", "OFF-PEAK", "TIER", "SCHEDULE"]):
                 found_numbers = [clean_val(c) for c in row if clean_val(c) > 0]
                 for val in found_numbers:
-                    # If expressed as monthly ($24.15, $12.00, $6.00) convert to daily
                     if 20.0 <= val <= 30.0:
                         fixed_fees["baseServiceStandard"] = round(val / 30.0, 5)
                         print(f"    [Captured] Base Services Charge (Standard): ${val:.2f}/mo (${fixed_fees['baseServiceStandard']:.5f}/day)")
@@ -211,7 +210,7 @@ def parse_pge_xlsx(file_path):
                     elif 4.0 <= val <= 8.0:
                         fixed_fees["baseServiceCARE"] = round(val / 30.0, 5)
                         print(f"    [Captured] Base Services Charge (CARE): ${val:.2f}/mo (${fixed_fees['baseServiceCARE']:.5f}/day)")
-                    elif 0.50 <= val <= 1.20:
+                    elif 0.60 <= val <= 1.00:
                         fixed_fees["baseServiceStandard"] = val
                         print(f"    [Captured] Base Services Charge (Daily): ${val:.5f}/day")
 

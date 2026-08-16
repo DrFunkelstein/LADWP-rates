@@ -4,6 +4,12 @@
   "baselineCredit": 0.0814,
   "sbpExportRate": 0.075,
   "nscRate": 0.032,
+    "fixed": {
+    "baseServiceStandard": 0.80500,
+    "baseServiceFERA": 0.40000,
+    "baseServiceCARE": 0.20000,
+    "evbMeterCharge": 0.41300
+  },
   "baselineAllowances": {
     "T": {
       "summer": {

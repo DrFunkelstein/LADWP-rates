@@ -12,7 +12,7 @@ on:
   # Trigger when a PDF is committed to the uploads folder
   push:
     paths:
-      - 'sdge_uploads/**.pdf'
+      - 'upload_folders/sdge_uploads/**.pdf'
 
 jobs:
   build:
@@ -31,17 +31,17 @@ jobs:
 
       - name: Run Automated Scraper
         # This keeps the dates fresh if no PDF is uploaded
-        run: python update_sdge_rates.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+        run: python scrapers/update_sdge_rates.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
 
       - name: Run Manual PDF Parser
         # This overwrites web data with the high-precision PDF data
-        run: python parse_sdge_manual.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+        run: python parsers/parse_sdge_manual.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
 
       - name: Commit and Push
         if: github.event.inputs.dry_run != 'true'
         run: |
           git config --global user.name 'SDGE-Bot'
           git config --global user.email 'bot@utilityestimator.com'
-          git add sdge_rates.json
+          git add rates/sdge_rates.json
           git commit -m "SDG&E rate update: $(date)" || exit 0
           git push

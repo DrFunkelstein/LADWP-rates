@@ -14,7 +14,7 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 URL = "https://pwp.cityofpasadena.net/water-and-electric-rates/"
-OUTPUT_FILE = "pwp_rates.json"
+OUTPUT_FILE = "rates/pwp_rates.json"
 
 def fetch_html(verbose: bool) -> str:
     log(f"Fetching HTML from: {URL}", verbose)

@@ -5,6 +5,12 @@ import json
 import re
 from datetime import datetime
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+OUTPUT_FILE = os.path.normpath(os.path.join(ROOT_DIR, "rates", "ladwp_rates.json"))
+
 # --- CONFIGURATION ---
 ELECTRIC_URL = "https://www.ladwp.com/account/customer-service/electric-rates/residential-rates"
 WATER_URL = "https://www.ladwp.com/account/customer-service/water-rates/schedule-residential"

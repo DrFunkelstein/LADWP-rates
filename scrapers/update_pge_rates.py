@@ -309,10 +309,22 @@ def main():
                                     current_json["baselineAllowances"][t][season][code] = val
                                 updated = True
 
-    # 3. Update Plan Rates
+    # 3. Update Plan Rates (Safe initialization prevents KeyError)
     for plan in ["E-1 tiered", "E-TOU-C", "E-TOU-D", "E-ELEC", "EV2-A", "EV-B"]:
         if plan not in new_data: continue
+        
+        # Ensure plan exists in target JSON
+        if "plans" not in current_json:
+            current_json["plans"] = {}
+        if plan not in current_json["plans"]:
+            current_json["plans"][plan] = {"summer": {}, "winter": {}}
+            updated = True
+            print(f"  [NEW] Added Plan '{plan}' to JSON")
+
         for season in ["summer", "winter"]:
+            if season not in current_json["plans"][plan]:
+                current_json["plans"][plan][season] = {}
+
             p_res = new_data[plan].get(season, {})
             for b_type in ["onPeak", "offPeak", "superOffPeak"]:
                 rate = p_res.get(b_type, 0)

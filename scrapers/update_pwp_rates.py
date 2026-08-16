@@ -13,11 +13,15 @@ import sys
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
-URL = "https://pwp.cityofpasadena.net/water-and-electric-rates/"
-OUTPUT_FILE = "rates/pwp_rates.json"
 
-def fetch_html(verbose: bool) -> str:
-    log(f"Fetching HTML from: {URL}", verbose)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+OUTPUT_FILE = os.path.normpath(os.path.join(ROOT_DIR, "rates", "pwp_rates.json"))
+URL = "https://pwp.cityofpasadena.net/water-and-electric-rates/"
+
+def log(msg: str, verbose: bool = True):
+    if verbose:
+        print(f"[*] {msg}")
     
     session = requests.Session()
     headers = {

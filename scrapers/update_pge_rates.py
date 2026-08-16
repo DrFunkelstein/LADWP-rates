@@ -91,7 +91,6 @@ def parse_pge_baseline_allowances(xlsx):
     extracted_allowances = {t: {"summer": {}, "winter": {}} for t in ["T", "P", "R", "S", "X"]}
     territories = ["T", "P", "R", "S", "X"]
     
-    # 1. Target the Baseline sheet
     target_sheet = None
     for name in xlsx.sheet_names:
         if "ElecBaseline" in name or "Baseline" in name:
@@ -105,13 +104,12 @@ def parse_pge_baseline_allowances(xlsx):
     print(f"  > Target Sheet Found: '{target_sheet}'")
     df = xlsx.parse(target_sheet, header=None)
 
-    current_code_left = "allElectric"  # Winter default section
-    current_code_right = "allElectric" # Summer default section
+    current_code_left = "allElectric"
+    current_code_right = "allElectric"
 
     for idx, row in df.iterrows():
         row_str = " ".join([str(cell) for cell in row.dropna().tolist()])
         
-        # Section Tracking: Code H (All-Electric) vs Code B (Basic)
         if "CODE H" in row_str.upper() or "ALL ELEC" in row_str.upper():
             current_code_left = "allElectric"
             current_code_right = "allElectric"
@@ -119,11 +117,9 @@ def parse_pge_baseline_allowances(xlsx):
             current_code_left = "basic"
             current_code_right = "basic"
 
-        # Scan row cells for Territory letters
         for col_idx, cell in enumerate(row):
             cell_str = str(cell).strip().upper()
             
-            # Match standalone territory letter (T, P, R, S, X)
             t_match = None
             if cell_str in territories:
                 t_match = cell_str
@@ -132,7 +128,6 @@ def parse_pge_baseline_allowances(xlsx):
                 if t in territories: t_match = t
 
             if t_match:
-                # Look for the first positive numeric value to the right (Individually Metered Daily)
                 numeric_vals = []
                 for val_idx in range(col_idx + 1, min(col_idx + 4, len(row))):
                     v = clean_val(row.iloc[val_idx])
@@ -141,7 +136,7 @@ def parse_pge_baseline_allowances(xlsx):
                 
                 if numeric_vals:
                     individually_metered_val = numeric_vals[0]
-                    is_summer_side = col_idx >= 4  # Right 4 columns = Summer
+                    is_summer_side = col_idx >= 4
                     
                     season = "summer" if is_summer_side else "winter"
                     code_type = current_code_right if is_summer_side else current_code_left
@@ -149,7 +144,6 @@ def parse_pge_baseline_allowances(xlsx):
                     extracted_allowances[t_match][season][code_type] = individually_metered_val
                     print(f"    [Captured] Territory {t_match} ({season:6} - {code_type:11}): {individually_metered_val} kWh/day")
 
-    # Filter out empty structures
     valid_result = {t: data for t, data in extracted_allowances.items() 
                     if "basic" in data["summer"] or "allElectric" in data["summer"]}
     return valid_result
@@ -159,6 +153,14 @@ def parse_pge_xlsx(file_path):
     xlsx = pd.ExcelFile(file_path)
     extracted_data = {}
     baseline_credit_found = None
+    
+    # Defaults for Base Services & Meter Charges ($/day)
+    fixed_fees = {
+        "baseServiceStandard": 24.15 / 30.0, # $0.80500/day
+        "baseServiceFERA":     12.00 / 30.0, # $0.40000/day
+        "baseServiceCARE":      6.00 / 30.0, # $0.20000/day
+        "evbMeterCharge":      0.41300       # $0.41300/day
+    }
 
     plan_identities = {
         "E-1 tiered": ["Residential Schedules", "E1,"],
@@ -180,8 +182,40 @@ def parse_pge_xlsx(file_path):
 
         for idx, row in df.iterrows():
             first_cell = str(row.iloc[0]).strip()
-            row_str = " ".join([str(i) for i in row.tolist()])
-            
+            row_str = " ".join([str(i) for i in row.dropna().tolist()])
+            row_upper = row_str.upper()
+
+            # --- 1. Fixed & Meter Charge Extraction ---
+            # Check for EV-B dedicated meter charge ($ per meter per day)
+            if "EV, RATE B" in row_upper or "EV-B" in row_upper or current_plan_id == "EV-B":
+                if "METER CHARGE" in row_upper or "CUSTOMER CHARGE" in row_upper:
+                    for c in row:
+                        val = clean_val(c)
+                        if 0.10 <= val <= 2.00:
+                            fixed_fees["evbMeterCharge"] = val
+                            print(f"    [Captured] EV-B Dedicated Meter Charge: ${val:.5f}/day")
+                            break
+
+            # Check for Base Services Charge row
+            if "BASE SERVICE" in row_upper or "SERVICE CHARGE" in row_upper:
+                # Extract any positive values in the row
+                found_numbers = [clean_val(c) for c in row if clean_val(c) > 0]
+                for val in found_numbers:
+                    # If expressed as monthly ($24.15, $12.00, $6.00) convert to daily
+                    if 20.0 <= val <= 30.0:
+                        fixed_fees["baseServiceStandard"] = round(val / 30.0, 5)
+                        print(f"    [Captured] Base Services Charge (Standard): ${val:.2f}/mo (${fixed_fees['baseServiceStandard']:.5f}/day)")
+                    elif 10.0 <= val <= 15.0:
+                        fixed_fees["baseServiceFERA"] = round(val / 30.0, 5)
+                        print(f"    [Captured] Base Services Charge (FERA): ${val:.2f}/mo (${fixed_fees['baseServiceFERA']:.5f}/day)")
+                    elif 4.0 <= val <= 8.0:
+                        fixed_fees["baseServiceCARE"] = round(val / 30.0, 5)
+                        print(f"    [Captured] Base Services Charge (CARE): ${val:.2f}/mo (${fixed_fees['baseServiceCARE']:.5f}/day)")
+                    elif 0.50 <= val <= 1.20:
+                        fixed_fees["baseServiceStandard"] = val
+                        print(f"    [Captured] Base Services Charge (Daily): ${val:.5f}/day")
+
+            # --- 2. Plan Header Identification ---
             found_anchor = False
             for json_id, markers in plan_identities.items():
                 if any(m in first_cell for m in markers):
@@ -241,7 +275,7 @@ def parse_pge_xlsx(file_path):
     # Extract Baseline Allowances
     extracted_allowances = parse_pge_baseline_allowances(xlsx)
 
-    return extracted_data, baseline_credit_found, extracted_allowances
+    return extracted_data, baseline_credit_found, extracted_allowances, fixed_fees
 
 def cleanup_bins(data):
     two_tier_plans = ["E-1 tiered", "E-TOU-C", "E-TOU-D"]
@@ -263,7 +297,7 @@ def main():
     download_xlsx(XLSX_URL, tmp_xlsx)
     
     try:
-        new_data, b_credit, new_allowances = parse_pge_xlsx(tmp_xlsx)
+        new_data, b_credit, new_allowances, fixed_fees = parse_pge_xlsx(tmp_xlsx)
         new_data = cleanup_bins(new_data)
         solar_rates = fetch_pge_solar_clawback_rates()
     except Exception as e:
@@ -284,12 +318,27 @@ def main():
     # 1. Update Global Baseline Credit
     if b_credit:
         old_bc = current_json.get("baselineCredit", 0)
-        if abs(b_credit - old_bc) > 0.0001:
-            print(f"  [CHANGE] Global Baseline Credit: ${old_bc:.5f} -> ${b_credit:.5f}")
+        diff = abs(b_credit - old_bc)
+        status = "[MATCH]" if diff < 0.0001 else "[CHANGE]"
+        print(f"  {status} Global Baseline Credit: JSON=${old_bc:.5f} | Source=${b_credit:.5f}")
+        if diff > 0.0001:
             if not args.dry_run: current_json["baselineCredit"] = b_credit
             updated = True
 
-    # 2. Update Solar Claw-Back & NSC Rates
+    # 2. Update Fixed & Base Services Charges
+    if "fixed" not in current_json:
+        current_json["fixed"] = {}
+    
+    for key, val in fixed_fees.items():
+        curr_val = current_json["fixed"].get(key, 0.0)
+        diff = abs(val - curr_val)
+        status = "[MATCH]" if diff < 0.0001 else "[CHANGE]"
+        print(f"  {status} Fixed Fee ({key:20}): JSON=${curr_val:.5f} | Source=${val:.5f}/day")
+        if diff > 0.0001:
+            if not args.dry_run: current_json["fixed"][key] = val
+            updated = True
+
+    # 3. Update Solar Claw-Back & NSC Rates
     if "nscRate" in solar_rates:
         curr_nsc = current_json.get("nscRate", 0.0)
         diff = abs(solar_rates["nscRate"] - curr_nsc)
@@ -308,7 +357,7 @@ def main():
             if not args.dry_run: current_json["sbpExportRate"] = solar_rates["sbpExportRate"]
             updated = True
 
-    # 3. Update Baseline Allowances Table
+    # 4. Update Baseline Allowances Table
     if new_allowances:
         if "baselineAllowances" not in current_json:
             current_json["baselineAllowances"] = {}
@@ -330,7 +379,7 @@ def main():
                                     current_json["baselineAllowances"][t][season][code] = val
                                 updated = True
 
-    # 4. Update Plan Rates (Safe initialization prevents KeyError on new/unlisted plans)
+    # 5. Update Plan Rates (Safe initialization prevents KeyError)
     for plan in ["E-1 tiered", "E-TOU-C", "E-TOU-D", "E-ELEC", "EV2-A", "EV-B"]:
         if plan not in new_data: continue
         

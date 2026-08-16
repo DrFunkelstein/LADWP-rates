@@ -1,0 +1,43 @@
+name: GWP Auto Update
+on:
+  schedule:
+    - cron: '0 10 1 * *' 
+  workflow_dispatch: 
+    inputs:
+      dry_run:
+        description: 'Dry Run (Check for changes but do not save)'
+        required: true
+        type: boolean
+        default: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4 
+
+      - name: Setup Python
+        uses: actions/setup-python@v5 
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Run Scraper
+        run: |
+          python update_gwp_rates.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+
+      - name: Commit and Push Changes
+        if: github.event.inputs.dry_run != 'true'
+        run: |
+          git config --global user.name 'GWP-Bot'
+          git config --global user.email 'bot@utilityestimator.com'
+          git add gwp_rates.json
+          git commit -m "Automated GWP rate update: $(date)" || exit 0
+          git push

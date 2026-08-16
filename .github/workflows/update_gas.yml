@@ -34,6 +34,8 @@ jobs:
           git config --global user.name 'GasBot'
           git config --global user.email 'bot@utilityestimator.com'
           git add rates/socalgas_rates.json
+          cp rates/socalgas_rates.json socalgas_rates.json || true
+          git add socalgas_rates.json
           
           # Only commit if the scraper actually found a new number
           if git diff --staged --quiet; then

@@ -1,11 +1,13 @@
 {
-  "lastUpdated": "2026-08-16",
+  "lastUpdated": "2026-08-17",
   "utility": "Anaheim Public Utilities",
   "electric": {
     "customerChargeMonthly": 5.40,
     "tier1LimitMonthly": 240.0,
     "tier1Rate": 0.14120,
     "tier2Rate": 0.20780,
+    "sbpExportRate": 0.05940,
+    "nscRate": 0.03850,
     "touEV": {
       "onPeak": 0.34210,
       "offPeak": 0.18550,

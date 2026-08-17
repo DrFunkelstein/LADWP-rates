@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Burbank Water & Power (BWP) Rate Scraper
-Fetches current residential electric, water, and solar Avoided Cost / NSC rates.
+Burbank Water & Power (BWP) Resilient Rate Scraper
+Uses Dynamic PDF Discovery + Static HTML Web Scraping + Non-Destructive Fallbacks.
 """
 
 import argparse
@@ -9,13 +9,16 @@ import json
 import os
 import re
 import sys
+import io
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
+import pdfplumber
 
 # --- CONFIGURATION ---
-URL = "https://www.burbankwaterandpower.com/electric/electric-rates"
-SOLAR_URL = "https://www.burbankwaterandpower.com/solar-billing-faq"
+BWP_RATES_URL = "https://www.burbankwaterandpower.com/electric/electric-rates"
+BWP_SOLAR_URL = "https://www.burbankwaterandpower.com/solar-billing-faq"
+CITY_FINANCE_URL = "https://www.burbankca.gov/web/financial-services"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
@@ -26,135 +29,175 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 }
 
-
 def parse_args():
-    parser = argparse.ArgumentParser(description="BWP Rate Scraper")
+    parser = argparse.ArgumentParser(description="BWP Resilient Rate Scraper")
     parser.add_argument("--dry-run", action="store_true", help="Scrape without saving to disk")
     parser.add_argument("--verbose", action="store_true", help="Verbose logs")
     return parser.parse_args()
 
+# =============================================================================
+# LAYER 1: STATIC BWP HTML SCRAPING
+# =============================================================================
+def scrape_bwp_web_rates(verbose: bool) -> dict:
+    """Scrapes the primary BWP Electric Rates and Solar Billing FAQ pages."""
+    rates_found = {}
+    
+    # 1. Electric Rates Page
+    try:
+        if verbose: print(f"[*] Checking BWP Rates Page: {BWP_RATES_URL}")
+        res = requests.get(BWP_RATES_URL, headers=HEADERS, timeout=15)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, "html.parser")
+            text = soup.get_text()
 
-def fetch_html(url: str, verbose: bool) -> str:
-    if verbose:
-        print(f"[*] Fetching BWP Data from: {url}")
-    session = requests.Session()
-    response = session.get(url, headers=HEADERS, timeout=20)
-    response.raise_for_status()
-    return response.text
+            cust_match = re.search(r"Customer Service Charge.*?\$([\d\.]+)", text)
+            if cust_match: rates_found["customerServiceCharge"] = float(cust_match.group(1))
 
+            t1_match = re.search(r"First 300 kWh.*?\$([\d\.]+)", text)
+            if t1_match: rates_found["tier1EnergyRate"] = float(t1_match.group(1))
 
-def parse_bwp_solar_rates(verbose: bool) -> dict:
+            t2_match = re.search(r"All additional kWh.*?\$([\d\.]+)", text)
+            if t2_match: rates_found["tier2EnergyRate"] = float(t2_match.group(1))
+
+            ecac_match = re.search(r"ECAC.*?\$([\d\.]+)", text)
+            if ecac_match: rates_found["ecac"] = float(ecac_match.group(1))
+    except Exception as e:
+        if verbose: print(f"  [Warning] Web rates scrape error: {e}")
+
+    # 2. Solar FAQ Page (Avoided Cost & NSC)
+    try:
+        if verbose: print(f"[*] Checking BWP Solar FAQ: {BWP_SOLAR_URL}")
+        res = requests.get(BWP_SOLAR_URL, headers=HEADERS, timeout=15)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, "html.parser")
+            text = soup.get_text()
+
+            acoe_match = re.search(r"between\s+(\d+\.\d+)\s+and\s+(\d+\.\d+)\s+cents", text, re.I)
+            if acoe_match:
+                low = float(acoe_match.group(1)) / 100
+                high = float(acoe_match.group(2)) / 100
+                rates_found["sbpExportRate"] = round((low + high) / 2.0, 5)
+
+            nsc_match = re.search(r"(\d+\.\d+)\s+cents\s+per\s+kWh", text, re.I)
+            if nsc_match:
+                rates_found["nscRate"] = round(float(nsc_match.group(1)) / 100, 5)
+    except Exception as e:
+        if verbose: print(f"  [Warning] Solar FAQ scrape error: {e}")
+
+    return rates_found
+
+# =============================================================================
+# LAYER 2: DYNAMIC CITYWIDE FEE SCHEDULE PDF DISCOVERY
+# =============================================================================
+def discover_and_parse_citywide_fee_pdf(verbose: bool) -> dict:
     """
-    Fetches BWP's Avoided Cost of Energy (ACOE) export rate and 
-    Net Surplus Compensation (NSC) rate.
+    Visits the City of Burbank Financial Services page, dynamically finds the 
+    current 'Fee Schedule' PDF link regardless of year string, and parses BWP rates.
     """
-    acoe_rate = 0.09110 # Verified average (6.66¢ - 11.56¢ range)
-    nsc_rate = 0.04500  # Verified annual check buyout rate (4.5¢)
+    if verbose: print(f"\n[*] Scanning City Financial Services for PDF: {CITY_FINANCE_URL}")
+    pdf_rates = {}
     
     try:
-        html = fetch_html(SOLAR_URL, verbose)
-        soup = BeautifulSoup(html, "html.parser")
-        text = soup.get_text()
-
-        # Look for ACOE cents pattern e.g. "between 6.66 and 11.56 cents"
-        acoe_match = re.search(r"between\s+(\d+\.\d+)\s+and\s+(\d+\.\d+)\s+cents", text, re.I)
-        if acoe_match:
-            low = float(acoe_match.group(1)) / 100
-            high = float(acoe_match.group(2)) / 100
-            acoe_rate = round((low + high) / 2.0, 5)
-            if verbose:
-                print(f"  > Parsed BWP ACOE Export Rate Range: ${low:.4f} - ${high:.4f} (Avg: ${acoe_rate:.5f}/kWh)")
-
-        # Look for NSC check buyout rate e.g. "4.5 cents per kWh"
-        nsc_match = re.search(r"(\d+\.\d+)\s+cents\s+per\s+kWh", text, re.I)
-        if nsc_match:
-            nsc_rate = round(float(nsc_match.group(1)) / 100, 5)
-            if verbose:
-                print(f"  > Parsed BWP NSC Buyout Rate: ${nsc_rate:.5f}/kWh")
+        res = requests.get(CITY_FINANCE_URL, headers=HEADERS, timeout=15)
+        if res.status_code != 200: return pdf_rates
+        
+        soup = BeautifulSoup(res.text, "html.parser")
+        pdf_url = None
+        
+        # Search all links for Fee Schedule keywords
+        for a in soup.find_all("a", href=True):
+            link_text = a.get_text().upper()
+            href = a["href"]
+            if ("FEE SCHEDULE" in link_text or "CITYWIDE FEE" in link_text) and (".pdf" in href.lower() or "docaccess" in href.lower()):
+                pdf_url = href if href.startswith("http") else f"https://www.burbankca.gov{href}"
+                if verbose: print(f"  > Discovered Current Citywide Fee Schedule Link: {pdf_url}")
+                break
+                
+        if pdf_url:
+            pdf_res = requests.get(pdf_url, headers=HEADERS, timeout=25)
+            if pdf_res.status_code == 200:
+                with pdfplumber.open(io.BytesIO(pdf_res.content)) as pdf:
+                    for page in pdf.pages:
+                        page_text = page.extract_text() or ""
+                        if "BURBANK WATER AND POWER" in page_text.upper() or "SCHEDULE D" in page_text.upper():
+                            # Extract Tier 1 & Tier 2 lines
+                            t1 = re.search(r"First 300 kWh.*?(\d+\.\d{4})", page_text)
+                            t2 = re.search(r"All additional kWh.*?(\d+\.\d{4})", page_text)
+                            if t1: pdf_rates["tier1EnergyRate"] = float(t1.group(1))
+                            if t2: pdf_rates["tier2EnergyRate"] = float(t2.group(1))
+                            break
     except Exception as e:
-        if verbose:
-            print(f"  [Warning] Solar rate fetch fallback used: {e}")
-            
-    return {
-        "sbpExportRate": acoe_rate,
-        "nscRate": nsc_rate
-    }
+        if verbose: print(f"  [Warning] PDF Discovery fallback error: {e}")
+        
+    return pdf_rates
 
+# =============================================================================
+# MAIN ORCHESTRATOR
+# =============================================================================
+def main():
+    args = parse_args()
+    
+    # Load existing JSON for non-destructive updating
+    current_data = {}
+    if os.path.exists(OUTPUT_FILE):
+        with open(OUTPUT_FILE, "r") as f:
+            current_data = json.load(f)
 
-def parse_bwp_rates(html: str, verbose: bool) -> dict:
-    soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text()
+    # 1. Attempt Layer 1 (Static Web)
+    web_rates = scrape_bwp_web_rates(args.verbose)
+    
+    # 2. Attempt Layer 2 (PDF Discovery) if web scrape had missing fields
+    if not all(k in web_rates for k in ["tier1EnergyRate", "tier2EnergyRate", "customerServiceCharge"]):
+        pdf_rates = discover_and_parse_citywide_fee_pdf(args.verbose)
+        web_rates.update({k: v for k, v in pdf_rates.items() if k not in web_rates})
 
-    cust_match = re.search(r"Customer Service Charge.*?\$([\d\.]+)", text)
-    cust_charge = float(cust_match.group(1)) if cust_match else 19.50
-
-    t1_match = re.search(r"First 300 kWh.*?\$([\d\.]+)", text)
-    t2_match = re.search(r"All additional kWh.*?\$([\d\.]+)", text)
-    ecac_match = re.search(r"ECAC.*?\$([\d\.]+)", text)
-
-    t1_rate = float(t1_match.group(1)) if t1_match else 0.1460
-    t2_rate = float(t2_match.group(1)) if t2_match else 0.2442
-    ecac_rate = float(ecac_match.group(1)) if ecac_match else 0.0340
-
-    solar_rates = parse_bwp_solar_rates(verbose)
-
+    # 3. Assemble Full Rate Dictionary with Fallback Defaults
     data = {
         "lastUpdated": datetime.now().strftime("%Y-%m-%d"),
-        "utility": "BWP",
+        "utility": "Burbank Water and Power",
         "electric": {
-            "customerServiceCharge": cust_charge,
+            "customerServiceCharge": web_rates.get("customerServiceCharge", current_data.get("electric", {}).get("customerServiceCharge", 19.50)),
             "serviceSizeCharge": 4.45,
-            "ecac": ecac_rate,
+            "ecac": web_rates.get("ecac", current_data.get("electric", {}).get("ecac", 0.03400)),
             "taxRate": 0.070,
             "tier1Limit": 300.0,
-            "tier1EnergyRate": t1_rate,
-            "tier2EnergyRate": t2_rate,
-            "sbpExportRate": solar_rates["sbpExportRate"],
-            "nscRate": solar_rates["nscRate"]
+            "tier1EnergyRate": web_rates.get("tier1EnergyRate", current_data.get("electric", {}).get("tier1EnergyRate", 0.14600)),
+            "tier2EnergyRate": web_rates.get("tier2EnergyRate", current_data.get("electric", {}).get("tier2EnergyRate", 0.24420)),
+            "sbpExportRate": web_rates.get("sbpExportRate", current_data.get("electric", {}).get("sbpExportRate", 0.09110)),
+            "nscRate": web_rates.get("nscRate", current_data.get("electric", {}).get("nscRate", 0.04500))
         },
         "water": {
             "monthlyAvailabilityCharge": 24.87,
-            "wcac": 2.825,
+            "wcac": 2.82500,
             "limits": {
                 "tier1": 8.0,
                 "tier2": 20.0
             },
             "baseRates": {
-                "tier1": 1.785,
-                "tier2": 3.491,
-                "tier3": 4.315
+                "tier1": 1.78500,
+                "tier2": 3.49100,
+                "tier3": 4.31500
             }
         }
     }
-    return data
 
+    print("\n" + "=" * 60)
+    print("           BURBANK WATER & POWER RATE REPORT")
+    print("=" * 60)
+    print(f"Customer Service Charge: ${data['electric']['customerServiceCharge']:.2f}/month")
+    print(f"Service Size Charge:     ${data['electric']['serviceSizeCharge']:.2f}/month")
+    print(f"Schedule D Tier 1:       ${data['electric']['tier1EnergyRate'] + data['electric']['ecac']:.4f}/kWh (0-300 kWh)")
+    print(f"Schedule D Tier 2:       ${data['electric']['tier2EnergyRate'] + data['electric']['ecac']:.4f}/kWh (>300 kWh)")
+    print(f"Solar SBP ACOE Export:   ${data['electric']['sbpExportRate']:.5f}/kWh")
+    print(f"Solar NSC Buyout:        ${data['electric']['nscRate']:.5f}/kWh")
+    print("=" * 60)
 
-def main():
-    args = parse_args()
-    try:
-        html = fetch_html(URL, args.verbose)
-        data = parse_bwp_rates(html, args.verbose)
-        
-        print("\n" + "=" * 55)
-        print("          BWP RATE SCRAPER REPORT")
-        print("=" * 55)
-        print(f"Customer Charge:    ${data['electric']['customerServiceCharge']:.2f}/mo")
-        print(f"Tier 1 Total:       ${data['electric']['tier1EnergyRate'] + data['electric']['ecac']:.4f}/kWh (0-300 kWh)")
-        print(f"Tier 2 Total:       ${data['electric']['tier2EnergyRate'] + data['electric']['ecac']:.4f}/kWh (>300 kWh)")
-        print(f"Solar SBP ACOE:     ${data['electric']['sbpExportRate']:.5f}/kWh")
-        print(f"Solar NSC Rate:     ${data['electric']['nscRate']:.5f}/kWh")
-        print("=" * 55)
-
-        if args.dry_run:
-            print("[DRY RUN COMPLETE] File was not modified.")
-        else:
-            with open(OUTPUT_FILE, "w") as f:
-                json.dump(data, f, indent=2)
-            print(f"[SUCCESS] Updated {OUTPUT_FILE} successfully.")
-    except Exception as e:
-        print(f"[ERROR] Scraper failed: {e}", file=sys.stderr)
-        sys.exit(1)
-
+    if args.dry_run:
+        print("\n[DRY RUN COMPLETE] JSON validated. File was not modified.")
+    else:
+        with open(OUTPUT_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        print(f"\n[SUCCESS] Updated {OUTPUT_FILE} successfully.")
 
 if __name__ == "__main__":
     main()

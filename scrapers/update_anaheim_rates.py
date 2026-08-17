@@ -41,7 +41,7 @@ def parse_args():
 
 def fetch_anaheim_eec_rate(verbose: bool) -> float:
     """Parses Anaheim's NEM 2.0 Excess Energy Rate Sheet PDF for the active EEC rate ($/kWh)."""
-    eec_rate = 0.05940
+    eec_rate = 0.04770
     if not HAS_PDFPLUMBER: return eec_rate
         
     try:
@@ -67,7 +67,7 @@ def scrape_anaheim_web_rates(verbose: bool) -> dict:
     """Scrapes the live HTML Residential Rates page for Schedule D, TOU, and TOU-EV."""
     eec_rate = fetch_anaheim_eec_rate(verbose)
     
-    # Defaults
+    # Defaults (Verified from Schedule D & TOU tariffs)
     cust_charge = 8.00
     t1_rate = 0.14000
     t2_rate = 0.21490
@@ -88,38 +88,49 @@ def scrape_anaheim_web_rates(verbose: bool) -> dict:
         res = requests.get(ELECTRIC_RATES_URL, headers=HEADERS, timeout=15)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, "html.parser")
-            text = soup.get_text()
+            page_text = soup.get_text()
             
             # 1. Customer Charge ($8.00)
-            c_match = re.search(r"Monthly Charge\s+\$([\d\.]+)", text)
+            c_match = re.search(r"Monthly Charge\s+\$([\d\.]+)", page_text)
             if c_match: cust_charge = float(c_match.group(1))
 
             # 2. Schedule D Tiers (14.00¢ / 21.49¢)
-            t1_m = re.search(r"First 10 kWh.*?(\d+\.\d+)\s*¢", text)
-            t2_m = re.search(r"excess of the above.*?(\d+\.\d+)\s*¢", text)
+            t1_m = re.search(r"First 10 kWh.*?(\d+\.\d+)\s*¢", page_text)
+            t2_m = re.search(r"excess of the above.*?(\d+\.\d+)\s*¢", page_text)
             if t1_m: t1_rate = round(float(t1_m.group(1)) / 100.0, 5)
             if t2_m: t2_rate = round(float(t2_m.group(1)) / 100.0, 5)
 
-            # 3. TOU Rates
-            tou_on_m = re.findall(r"On-peak energy.*?(\d+\.\d+)\s*¢", text)
-            if len(tou_on_m) >= 2:
-                tou_summer_on = round(float(tou_on_m[0]) / 100.0, 5)
-                tou_winter_on = round(float(tou_on_m[1]) / 100.0, 5)
+            # 3. Section Isolation for Standard TOU vs TOU-EV
+            tables = soup.find_all("table")
+            for table in tables:
+                table_text = table.get_text()
+                
+                # Check for Standard TOU Table
+                if "Time-of-Use Rate" in table_text and "EV" not in table_text:
+                    on_matches = re.findall(r"On-peak energy.*?(\d+\.\d+)\s*¢", table_text)
+                    off_matches = re.findall(r"Off-peak energy.*?(\d+\.\d+)\s*¢", table_text)
+                    super_m = re.search(r"Super off-peak energy.*?(\d+\.\d+)\s*¢", table_text)
+                    
+                    if len(on_matches) >= 2:
+                        tou_summer_on = round(float(on_matches[0]) / 100.0, 5)
+                        tou_winter_on = round(float(on_matches[1]) / 100.0, 5)
+                    if len(off_matches) >= 2:
+                        tou_summer_off = round(float(off_matches[0]) / 100.0, 5)
+                        tou_winter_off = round(float(off_matches[1]) / 100.0, 5)
+                    if super_m:
+                        tou_winter_super = round(float(super_m.group(1)) / 100.0, 5)
 
-            tou_off_m = re.findall(r"Off-peak energy.*?(\d+\.\d+)\s*¢", text)
-            if len(tou_off_m) >= 2:
-                tou_summer_off = round(float(tou_off_m[0]) / 100.0, 5)
-                tou_winter_off = round(float(tou_off_m[1]) / 100.0, 5)
-                
-            super_m = re.search(r"Super off-peak energy.*?(\d+\.\d+)\s*¢", text)
-            if super_m:
-                tou_winter_super = round(float(super_m.group(1)) / 100.0, 5)
-                
-            if verbose:
-                print(f"  > Parsed Customer Charge: ${cust_charge:.2f}/mo")
-                print(f"  > Parsed Schedule D T1: ${t1_rate:.5f}, T2: ${t2_rate:.5f}")
-                print(f"  > Parsed TOU Summer: On=${tou_summer_on:.5f}, Off=${tou_summer_off:.5f}")
-                print(f"  > Parsed TOU Winter: On=${tou_winter_on:.5f}, Off=${tou_winter_off:.5f}, SuperOff=${tou_winter_super:.5f}")
+                # Check for TOU-EV Table
+                if "Time-of-Use EV Rate" in table_text or "Electric Vehicle" in table_text:
+                    ev_on = re.findall(r"On-peak energy.*?(\d+\.\d+)\s*¢", table_text)
+                    ev_off = re.findall(r"Off-peak energy.*?(\d+\.\d+)\s*¢", table_text)
+                    if len(ev_on) >= 2:
+                        tou_ev_summer_on = round(float(ev_on[0]) / 100.0, 5)
+                        tou_ev_winter_on = round(float(ev_on[1]) / 100.0, 5)
+                    if len(ev_off) >= 2:
+                        tou_ev_summer_off = round(float(ev_off[0]) / 100.0, 5)
+                        tou_ev_winter_off = round(float(ev_off[1]) / 100.0, 5)
+
     except Exception as e:
         if verbose: print(f"  [Warning] HTML parse skipped ({e}). Using verified rates.")
 
@@ -162,19 +173,32 @@ def main():
     try:
         data = scrape_anaheim_web_rates(args.verbose)
         
-        print("\n" + "=" * 65)
+        print("\n" + "=" * 70)
         print("          ANAHEIM PUBLIC UTILITIES RATE REPORT")
-        print("=" * 65)
-        print(f"Customer Service Charge: ${data['electric']['customerChargeMonthly']:.2f}/month")
-        print(f"Schedule D Tier 1:       ${data['electric']['tier1Rate']:.5f}/kWh (10 kWh/day)")
-        print(f"Schedule D Tier 2:       ${data['electric']['tier2Rate']:.5f}/kWh (>10 kWh/day)")
-        print(f"NEM 2.0 EEC Export Rate: ${data['electric']['sbpExportRate']:.5f}/kWh")
-        print(f"TOU Summer On-Peak:      ${data['electric']['tou']['summer']['onPeak']:.5f}/kWh")
-        print(f"TOU Winter Super-Off:    ${data['electric']['tou']['winter']['superOffPeak']:.5f}/kWh")
-        print(f"Water Tier 1 (0-10 HCF): ${data['water']['rates']['tier1']:.4f}/HCF")
-        print(f"Water Tier 2 (11-25):    ${data['water']['rates']['tier2']:.4f}/HCF")
-        print(f"Water Tier 3 (>25 HCF):  ${data['water']['rates']['tier3']:.4f}/HCF")
-        print("=" * 65)
+        print("=" * 70)
+        print("--- ELECTRIC FIXED & TIERED (SCHEDULE D) ---")
+        print(f"Customer Service Charge:   ${data['electric']['customerChargeMonthly']:.2f}/month")
+        print(f"Tier 1 (First 10 kWh/day): ${data['electric']['tier1Rate']:.5f}/kWh")
+        print(f"Tier 2 (Over 10 kWh/day):  ${data['electric']['tier2Rate']:.5f}/kWh")
+        print(f"NEM 2.0 EEC Export Rate:   ${data['electric']['sbpExportRate']:.5f}/kWh")
+        print(f"Annual NSC Buyout Rate:    ${data['electric']['nscRate']:.5f}/kWh")
+        print("\n--- DOMESTIC TIME-OF-USE (TOU) ---")
+        print(f"Summer On-Peak (4-9 PM):   ${data['electric']['tou']['summer']['onPeak']:.5f}/kWh")
+        print(f"Summer Off-Peak:           ${data['electric']['tou']['summer']['offPeak']:.5f}/kWh")
+        print(f"Winter On-Peak (4-9 PM):   ${data['electric']['tou']['winter']['onPeak']:.5f}/kWh")
+        print(f"Winter Off-Peak:           ${data['electric']['tou']['winter']['offPeak']:.5f}/kWh")
+        print(f"Winter Super-Off (12-6 AM):${data['electric']['tou']['winter']['superOffPeak']:.5f}/kWh")
+        print("\n--- DOMESTIC TOU-EV (GRANDFATHERED) ---")
+        print(f"Summer EV On-Peak:         ${data['electric']['touEV']['summer']['onPeak']:.5f}/kWh")
+        print(f"Summer EV Off-Peak:        ${data['electric']['touEV']['summer']['offPeak']:.5f}/kWh")
+        print(f"Winter EV On-Peak:         ${data['electric']['touEV']['winter']['onPeak']:.5f}/kWh")
+        print(f"Winter EV Off-Peak:        ${data['electric']['touEV']['winter']['offPeak']:.5f}/kWh")
+        print("\n--- WATER (SCHEDULE W-G) ---")
+        print(f"Monthly Availability:      ${data['water']['meterChargeMonthly']:.2f}/month")
+        print(f"Tier 1 (0 - 10 HCF):       ${data['water']['rates']['tier1']:.4f}/HCF")
+        print(f"Tier 2 (11 - 25 HCF):      ${data['water']['rates']['tier2']:.4f}/HCF")
+        print(f"Tier 3 (> 25 HCF):         ${data['water']['rates']['tier3']:.4f}/HCF")
+        print("=" * 70)
 
         if args.dry_run:
             print("\n[DRY RUN COMPLETE] JSON validated. File was not modified.")

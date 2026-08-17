@@ -92,7 +92,7 @@ def scrape_bwp_web_rates(verbose: bool) -> dict:
 def discover_and_parse_citywide_fee_pdf(verbose: bool) -> dict:
     """
     Visits the City of Burbank Financial Services page, dynamically finds the 
-    current 'Fee Schedule' PDF link regardless of year string, and parses BWP rates.
+    current 'Fee Schedule' PDF link, and extracts active Schedule D rates.
     """
     if verbose: print(f"\n[*] Scanning City Financial Services for PDF: {CITY_FINANCE_URL}")
     pdf_rates = {}
@@ -119,13 +119,43 @@ def discover_and_parse_citywide_fee_pdf(verbose: bool) -> dict:
                 with pdfplumber.open(io.BytesIO(pdf_res.content)) as pdf:
                     for page in pdf.pages:
                         page_text = page.extract_text() or ""
-                        if "BURBANK WATER AND POWER" in page_text.upper() or "SCHEDULE D" in page_text.upper():
-                            # Extract Tier 1 & Tier 2 lines
-                            t1 = re.search(r"First 300 kWh.*?(\d+\.\d{4})", page_text)
-                            t2 = re.search(r"All additional kWh.*?(\d+\.\d{4})", page_text)
-                            if t1: pdf_rates["tier1EnergyRate"] = float(t1.group(1))
-                            if t2: pdf_rates["tier2EnergyRate"] = float(t2.group(1))
-                            break
+                        if "RESIDENTIAL SERVICE" in page_text.upper() or "SCHEDULE D" in page_text.upper():
+                            lines = page_text.split('\n')
+                            for line in lines:
+                                line_clean = line.strip()
+                                line_upper = line_clean.upper()
+                                decimals = [float(d) for d in re.findall(r"\d+\.\d{3,5}", line_clean)]
+                                
+                                # 1. Tier 1 Base Energy ($0.1460)
+                                if "FIRST 300 KWH" in line_upper:
+                                    valid = [d for d in decimals if 0.10 <= d <= 0.20]
+                                    if valid:
+                                        pdf_rates["tier1EnergyRate"] = valid[0]
+                                        if verbose: print(f"    [PDF Extracted] Tier 1 Base Rate: ${pdf_rates['tier1EnergyRate']:.4f}/kWh")
+                                
+                                # 2. Tier 2 Base Energy ($0.2442)
+                                if "ALL ADDITIONAL KWH" in line_upper or "ALL ADD'L KWH" in line_upper:
+                                    valid = [d for d in decimals if 0.20 <= d <= 0.32]
+                                    if valid:
+                                        pdf_rates["tier2EnergyRate"] = valid[0]
+                                        if verbose: print(f"    [PDF Extracted] Tier 2 Base Rate: ${pdf_rates['tier2EnergyRate']:.4f}/kWh")
+
+                                # 3. ECAC ($0.0340)
+                                if "ECAC" in line_upper:
+                                    valid = [d for d in decimals if 0.02 <= d <= 0.06]
+                                    if valid:
+                                        pdf_rates["ecac"] = valid[0]
+                                        if verbose: print(f"    [PDF Extracted] ECAC Surcharge: ${pdf_rates['ecac']:.4f}/kWh")
+
+                                # 4. Customer Service Charge ($19.50)
+                                if "CUSTOMER SERVICE CHARGE" in line_upper:
+                                    valid = [d for d in decimals if 15.00 <= d <= 25.00]
+                                    if valid:
+                                        pdf_rates["customerServiceCharge"] = valid[0]
+                                        if verbose: print(f"    [PDF Extracted] Customer Service Charge: ${pdf_rates['customerServiceCharge']:.2f}/mo")
+
+                            if "tier1EnergyRate" in pdf_rates:
+                                break
     except Exception as e:
         if verbose: print(f"  [Warning] PDF Discovery fallback error: {e}")
         

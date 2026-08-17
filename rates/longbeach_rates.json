@@ -1,0 +1,25 @@
+{
+  "lastUpdated": "2026-08-16",
+  "utility": "Long Beach Utilities",
+  "gas": {
+    "customerChargeDaily": 0.18450,
+    "procurement": 0.44120,
+    "transportationTier1": 0.94210,
+    "transportationTier2": 1.38500,
+    "baselineDailyAllowance": 0.512,
+    "taxRate": 0.050
+  },
+  "water": {
+    "serviceChargeMonthly": 22.40,
+    "limits": {
+      "tier1": 7.0,
+      "tier2": 15.0
+    },
+    "rates": {
+      "tier1": 3.12000,
+      "tier2": 4.85000,
+      "tier3": 7.42000
+    },
+    "taxRate": 0.050
+  }
+}

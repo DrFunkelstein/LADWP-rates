@@ -1,10 +1,10 @@
-name: Anaheim Public Utilities Rate Sync
+name: Anaheim Auto Update
 
 on:
   schedule:
-    # Runs at 8:00 AM UTC on July 1st and January 1st (Municipal Fiscal Year Cadence)
-    - cron: '0 8 1 1,7 *'
-  workflow_dispatch:
+    # Runs at 10:00 AM UTC on July 1st and January 1st (Municipal Rate Ordinance Cadence)
+    - cron: '0 10 1 1,7 *' 
+  workflow_dispatch: 
     inputs:
       dry_run:
         description: 'Dry Run mode'
@@ -12,35 +12,37 @@ on:
         type: boolean
         default: false
 
-jobs:
-  scrape-and-sync-anaheim:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4 
+
+      - name: Setup Python
+        uses: actions/setup-python@v5 
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 pypdf pdfplumber
+      - name: Install Dependencies
+        run: pip install requests beautifulsoup4 pypdf pdfplumber
 
-      - name: Run Anaheim Scraper
+      - name: Run Scraper
+        # Passes --dry-run to the script if the checkbox is checked
         run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            echo "Executing in DRY RUN mode..."
-            python scrapers/update_anaheim_rates.py --verbose --dry-run
-          else
-            python scrapers/update_anaheim_rates.py --verbose
-          fi
+          python scrapers/update_anaheim_rates.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
 
-      - name: Commit and Push Updated Rates
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "Automated Anaheim Rate Sync [skip ci]"
-          file_pattern: "rates/anaheim_rates.json"
+      - name: Commit and Push Changes
+        # This step is skipped entirely if dry_run is true
+        if: github.event.inputs.dry_run != 'true'
+        run: |
+          git config --global user.name 'Anaheim-Bot'
+          git config --global user.email 'bot@utilityestimator.com'
+          git add rates/anaheim_rates.json
+          # Commit only if there are changes; '|| exit 0' prevents failure if no changes
+          git commit -m "Automated Anaheim rate update: $(date)" || exit 0
+          git push

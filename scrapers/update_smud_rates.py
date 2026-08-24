@@ -2,7 +2,6 @@
 """
 SMUD Residential Rates Scraper
 Fetches published residential tariff tables from SMUD (Sacramento Municipal Utility District)
-URL: https://www.smud.org/Rate-Information/Residential-rates
 """
 
 import os
@@ -13,10 +12,11 @@ import datetime
 import requests
 from bs4 import BeautifulSoup
 
-SMUD_RATES_URL = "https://www.smud.org/Rate-Information/Residential-rates"
+SMUD_TOD_URL = "https://www.smud.org/Rate-Information/Residential-rates/Time-of-Day-5-8pm-Rate/Rate-details-and-holidays"
+SMUD_MAIN_URL = "https://www.smud.org/Rate-Information/Residential-rates"
 JSON_OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "..", "rates", "smud_rates.json")
 
-# Verified Baseline Fallbacks (June 1, 2026 Tariff Update)
+# Verified Baseline Fallbacks (2026 Tariff)
 DEFAULT_RATES = {
     "lastUpdated": datetime.datetime.now().strftime("%Y-%m-%d"),
     "utility": "SMUD",
@@ -60,39 +60,61 @@ def parse_smud_rates():
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
-    rates_data = DEFAULT_RATES.copy()
+    rates_data = json.loads(json.dumps(DEFAULT_RATES))
     rates_data["lastUpdated"] = datetime.datetime.now().strftime("%Y-%m-%d")
 
+    # 1. Fetch Time-of-Day Rate Details Page
     try:
-        print(f"Fetching SMUD rates from: {SMUD_RATES_URL}")
-        response = requests.get(SMUD_RATES_URL, headers=headers, timeout=15)
-        response.raise_for_status()
+        print(f"Fetching SMUD Time-of-Day details: {SMUD_TOD_URL}")
+        res = requests.get(SMUD_TOD_URL, headers=headers, timeout=15)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, "html.parser")
+            text = soup.get_text()
 
-        soup = BeautifulSoup(response.text, "html.parser")
-        page_text = soup.get_text()
+            # Summer Peak ($0.3765 or 37.65¢)
+            summer_peak = re.search(r"Peak\s+5\s*p\.m\.\s*[–-]\s*8\s*p\.m\.\s*\$(\d+\.\d+)", text, re.IGNORECASE)
+            if summer_peak and 0.20 <= float(summer_peak.group(1)) <= 0.60:
+                rates_data["electric"]["rTod"]["summer"]["peak"] = float(summer_peak.group(1))
+                print(f"  ✓ R-TOD Summer Peak: ${rates_data['electric']['rTod']['summer']['peak']}")
 
-        # 1. Parse System Infrastructure Fixed Charge (SIFC)
-        # Look for standard SIFC (e.g. "$27.00" or "$27.00/month")
-        sifc_match = re.search(r"System Infrastructure Fixed Charge.*?\$(\d+\.\d{2})", page_text, re.IGNORECASE)
-        if sifc_match:
-            rates_data["electric"]["sifcMonthly"] = float(sifc_match.group(1))
-            print(f"  ✓ SIFC Monthly: ${rates_data['electric']['sifcMonthly']}")
+            # Summer Mid-Peak ($0.2139)
+            summer_mid = re.search(r"Mid-Peak.*?\$(\d+\.\d+)", text, re.IGNORECASE)
+            if summer_mid and 0.10 <= float(summer_mid.group(1)) <= 0.35:
+                rates_data["electric"]["rTod"]["summer"]["midPeak"] = float(summer_mid.group(1))
+                print(f"  ✓ R-TOD Summer Mid-Peak: ${rates_data['electric']['rTod']['summer']['midPeak']}")
 
-        # 2. Parse Time-of-Day (R-TOD) Rates
-        # Scans for Summer Peak (5-8 PM) (e.g., 37.65¢ or $0.3765)
-        summer_peak_match = re.search(r"Summer.*?Peak.*?(\d+\.\d+)¢", page_text, re.IGNORECASE | re.DOTALL)
-        if summer_peak_match:
-            rates_data["electric"]["rTod"]["summer"]["peak"] = round(float(summer_peak_match.group(1)) / 100.0, 4)
-            print(f"  ✓ R-TOD Summer Peak: ${rates_data['electric']['rTod']['summer']['peak']}/kWh")
+            # Summer Off-Peak ($0.1550)
+            summer_off = re.search(r"Off-Peak\s+Midnight\s*[–-]\s*noon\s*\$(\d+\.\d+)", text, re.IGNORECASE)
+            if summer_off and 0.08 <= float(summer_off.group(1)) <= 0.25:
+                rates_data["electric"]["rTod"]["summer"]["offPeak"] = float(summer_off.group(1))
+                print(f"  ✓ R-TOD Summer Off-Peak: ${rates_data['electric']['rTod']['summer']['offPeak']}")
 
-        # 3. Parse Solar Net Billing (Schedule SSR)
-        ssr_match = re.search(r"Solar.*?Storage.*?(\d+\.\d+)¢", page_text, re.IGNORECASE)
-        if ssr_match:
-            rates_data["electric"]["ssrSolarExportRate"] = round(float(ssr_match.group(1)) / 100.0, 4)
-            print(f"  ✓ SSR Solar Export Rate: ${rates_data['electric']['ssrSolarExportRate']}/kWh")
+            # Non-Summer Peak ($0.1776)
+            winter_peak = re.search(r"Non-summer.*?Peak\s+5\s*p\.m\.\s*[–-]\s*8\s*p\.m\.\s*\$(\d+\.\d+)", text, re.IGNORECASE | re.DOTALL)
+            if winter_peak and 0.10 <= float(winter_peak.group(1)) <= 0.30:
+                rates_data["electric"]["rTod"]["nonSummer"]["peak"] = float(winter_peak.group(1))
+                print(f"  ✓ R-TOD Non-Summer Peak: ${rates_data['electric']['rTod']['nonSummer']['peak']}")
+
+            # Non-Summer Off-Peak ($0.1285)
+            winter_off = re.search(r"Non-summer.*?Off-Peak.*?\$(\d+\.\d+)", text, re.IGNORECASE | re.DOTALL)
+            if winter_off and 0.05 <= float(winter_off.group(1)) <= 0.20:
+                rates_data["electric"]["rTod"]["nonSummer"]["offPeak"] = float(winter_off.group(1))
+                print(f"  ✓ R-TOD Non-Summer Off-Peak: ${rates_data['electric']['rTod']['nonSummer']['offPeak']}")
 
     except Exception as e:
-        print(f"Warning: Scraper parsing encountered error: {e}. Using verified default rate schema.")
+        print(f"Notice: TOD details parsing error: {e}. Using baseline tables.")
+
+    # 2. Fetch Fixed Charges from Main Page
+    try:
+        res_main = requests.get(SMUD_MAIN_URL, headers=headers, timeout=15)
+        if res_main.status_code == 200:
+            text_main = res_main.text
+            sifc = re.search(r"System Infrastructure Fixed Charge.*?\$(\d+\.\d{2})", text_main, re.IGNORECASE)
+            if sifc and 15.0 <= float(sifc.group(1)) <= 40.0:
+                rates_data["electric"]["sifcMonthly"] = float(sifc.group(1))
+                print(f"  ✓ SIFC Monthly: ${rates_data['electric']['sifcMonthly']}")
+    except Exception as e:
+        print(f"Notice: Main page SIFC parsing error: {e}.")
 
     return rates_data
 

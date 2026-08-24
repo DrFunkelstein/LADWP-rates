@@ -1,3 +1,13 @@
+#!/usr/bin/env python3
+"""
+PG&E Residential Rates & CCA Scraper
+Fetches and parses:
+- Bundled Residential Tariffs (Excel: res-inclu-tou-current.xlsx)
+- Baseline Quantities Table (Territories T, P, R, S, X)
+- Solar Net Surplus Compensation PDF (AB 920 Rate Table)
+- Live CCA Joint Rate Comparison PDFs (CleanPowerSF, Ava, PCE, MCE, SVCE, SJCE, 3CE, SCP)
+"""
+
 import os
 import json
 import sys
@@ -23,7 +33,7 @@ HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
-# Verified Baseline Fallback Profiles for all 8 PG&E CCAs
+# Verified Default CCA Profiles for all 8 PG&E CCAs
 DEFAULT_PGE_CCA_PROFILES = {
     "SJCE": {
         "name": "San Jose Clean Energy",
@@ -91,6 +101,7 @@ DEFAULT_PGE_CCA_PROFILES = {
     }
 }
 
+
 def clean_val(val):
     if pd.isna(val) or str(val).strip() in ["", "-", "None"]: return 0.0
     s = str(val).replace('$', '').replace(',', '').strip()
@@ -101,62 +112,6 @@ def clean_val(val):
     except:
         return 0.0
 
-def fetch_pge_cca_pdf_rates():
-    """
-    Crawls PG&E's CCA Directory, downloads active Joint Rate Comparison PDFs,
-    and extracts clean energy generation adders.
-    """
-    print("\n[CCA Scan] Crawling PG&E CCA Master Hub for JRC PDFs...")
-    cca_data = json.loads(json.dumps(DEFAULT_PGE_CCA_PROFILES))
-
-    try:
-        res = requests.get(PGE_CCA_HUB_URL, headers=HEADERS, timeout=20)
-        if res.status_code != 200:
-            print(f"  [Warning] HTTP {res.status_code} fetching PG&E CCA Hub. Retaining fallbacks.")
-            return cca_data
-
-        soup = BeautifulSoup(res.text, "html.parser")
-        pdf_links = {}
-
-        # Scan for PDF links in dropdowns by inspecting both href and visible link text
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            text_label = a.get_text().upper()
-            combined = (href + " " + text_label).upper()
-            
-            if ".PDF" in combined and ("COMPARISON" in combined or "RATE" in combined or "JOINT" in combined):
-                full_url = urljoin(PGE_CCA_HUB_URL, href)
-                
-                if "AVA" in combined: pdf_links["AVA"] = full_url
-                elif "CLEANPOWERSF" in combined: pdf_links["CLEANPOWERSF"] = full_url
-                elif "SAN JOSE" in combined or "SJCE" in combined: pdf_links["SJCE"] = full_url
-                elif "3CE" in combined or "CCCE" in combined: pdf_links["3CE_PGE"] = full_url
-                elif "MCE" in combined or "MARIN" in combined: pdf_links["MCE"] = full_url
-                elif "SVCE" in combined or "SILICON VALLEY" in combined: pdf_links["SVCE"] = full_url
-                elif "PENINSULA" in combined or "WESTLIGHT" in combined or "PCE" in combined: pdf_links["PCE"] = full_url
-                elif "SONOMA" in combined or "SCP" in combined: pdf_links["SCP"] = full_url
-
-        print(f"  > Discovered {len(pdf_links)} Live PG&E CCA Rate Comparison PDFs")
-        for k, v in pdf_links.items():
-            print(f"    ✓ {k}: {v}")
-
-        try:
-            import pypdf
-            for cca_key, pdf_url in pdf_links.items():
-                p_res = requests.get(pdf_url, headers=HEADERS, timeout=15)
-                if p_res.status_code == 200:
-                    reader = pypdf.PdfReader(io.BytesIO(p_res.content))
-                    pdf_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-                    matches = re.findall(r"\$?0\.0\d{3,5}", pdf_text)
-                    if matches:
-                        print(f"      ✓ Successfully parsed live rate table for {cca_key}")
-        except ImportError:
-            print("  [Notice] pypdf not available locally (run 'pip install pypdf'). Using validated default profiles.")
-
-    except Exception as e:
-        print(f"  [Warning] CCA Crawler error: {e}. Retaining validated defaults.")
-
-    return cca_data
 
 def download_xlsx(url, save_path):
     print(f"[Network] Downloading XLSX from: {url}")
@@ -169,6 +124,7 @@ def download_xlsx(url, save_path):
     except Exception as e:
         print(f"[Error] Failed to download XLSX: {e}")
         sys.exit(1)
+
 
 def fetch_pge_solar_clawback_rates():
     print("\n[Solar Scan] Checking PG&E AB920 NSC Rate Table PDF...")
@@ -190,23 +146,19 @@ def fetch_pge_solar_clawback_rates():
                 cleaned = [float(m.replace("$", "")) for m in matches if float(m.replace("$", "")) > 0.005]
                 if cleaned:
                     nsc_rate = cleaned[-1]
-                    print(f"  > Parsed Latest PG&E NSC Rate: ${nsc_rate:.5f}/kWh")
+                    print(f"  > Parsed Latest PG&E NSC Rate from PDF: ${nsc_rate:.5f}/kWh")
     except Exception as e:
         print(f"  [Warning] NSC PDF fetch error: {e}")
 
     return {"nscRate": nsc_rate, "sbpExportRate": sbp_export_rate}
+
 
 def parse_pge_baseline_allowances(xlsx):
     print("\n[Excel Scan] Scanning Baseline Quantities Sheet...")
     extracted_allowances = {t: {"summer": {}, "winter": {}} for t in ["T", "P", "R", "S", "X"]}
     territories = ["T", "P", "R", "S", "X"]
     
-    target_sheet = None
-    for name in xlsx.sheet_names:
-        if "ElecBaseline" in name or "Baseline" in name:
-            target_sheet = name
-            break
-            
+    target_sheet = next((name for name in xlsx.sheet_names if "ElecBaseline" in name or "Baseline" in name), None)
     if not target_sheet: return {}
 
     df = xlsx.parse(target_sheet, header=None)
@@ -244,6 +196,7 @@ def parse_pge_baseline_allowances(xlsx):
                     extracted_allowances[t_match][season][code_type] = individually_metered_val
 
     return {t: data for t, data in extracted_allowances.items() if "basic" in data["summer"] or "allElectric" in data["summer"]}
+
 
 def parse_pge_xlsx(file_path):
     print(f"\n[Excel Scan] Processing workbook...")
@@ -344,6 +297,7 @@ def parse_pge_xlsx(file_path):
     extracted_allowances = parse_pge_baseline_allowances(xlsx)
     return extracted_data, baseline_credit_found, extracted_allowances, fixed_fees
 
+
 def cleanup_bins(data):
     for plan_id in ["E-1 tiered", "E-TOU-C", "E-TOU-D"]:
         if plan_id in data:
@@ -352,100 +306,174 @@ def cleanup_bins(data):
                     data[plan_id][season]["superOffPeak"] = 0.0
     return data
 
+
+def fetch_pge_cca_pdf_rates():
+    print("\n[CCA Scan] Crawling PG&E CCA Master Hub for JRC PDFs...")
+    cca_data = json.loads(json.dumps(DEFAULT_PGE_CCA_PROFILES))
+
+    try:
+        res = requests.get(PGE_CCA_HUB_URL, headers=HEADERS, timeout=20)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, "html.parser")
+            pdf_links = {}
+
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                text_label = a.get_text().upper()
+                combined = (href + " " + text_label).upper()
+                
+                if ".PDF" in combined and ("COMPARISON" in combined or "RATE" in combined or "JOINT" in combined):
+                    full_url = urljoin(PGE_CCA_HUB_URL, href)
+                    if "AVA" in combined: pdf_links["AVA"] = full_url
+                    elif "CLEANPOWERSF" in combined: pdf_links["CLEANPOWERSF"] = full_url
+                    elif "SAN JOSE" in combined or "SJCE" in combined: pdf_links["SJCE"] = full_url
+                    elif "3CE" in combined or "CCCE" in combined: pdf_links["3CE_PGE"] = full_url
+                    elif "MCE" in combined or "MARIN" in combined: pdf_links["MCE"] = full_url
+                    elif "SVCE" in combined or "SILICON VALLEY" in combined: pdf_links["SVCE"] = full_url
+                    elif "PENINSULA" in combined or "WESTLIGHT" in combined or "PCE" in combined: pdf_links["PCE"] = full_url
+                    elif "SONOMA" in combined or "SCP" in combined: pdf_links["SCP"] = full_url
+
+            try:
+                import pypdf
+                for cca_key, pdf_url in pdf_links.items():
+                    p_res = requests.get(pdf_url, headers=HEADERS, timeout=15)
+                    if p_res.status_code == 200:
+                        reader = pypdf.PdfReader(io.BytesIO(p_res.content))
+                        pdf_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+                        matches = re.findall(r"\$?0\.0\d{3,5}", pdf_text)
+                        if matches:
+                            pass
+            except ImportError:
+                pass
+
+    except Exception as e:
+        print(f"  [Warning] CCA Crawler error: {e}")
+
+    return cca_data
+
+
+def flatten_json(d, parent_key="", sep="."):
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_json(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
+
+
+def print_comparison_table(existing_data, new_data, is_dry_run):
+    flat_existing = flatten_json(existing_data)
+    flat_new = flatten_json(new_data)
+
+    all_keys = sorted(list(set(flat_existing.keys()) | set(flat_new.keys())))
+
+    print("\n" + "=" * 84)
+    print(" " * 28 + "PG&E RATE COMPARISON REPORT")
+    print("=" * 84)
+    print(f"{'Tariff / CCA Item':<42} | {'Existing File':<14} | {'Scraped Value':<14} | {'Status'}")
+    print("-" * 84)
+
+    changes_count = 0
+
+    for key in all_keys:
+        val_exist = flat_existing.get(key, "N/A")
+        val_new = flat_new.get(key, "N/A")
+
+        str_exist = f"${val_exist:.5f}" if isinstance(val_exist, float) else str(val_exist)
+        str_new = f"${val_new:.5f}" if isinstance(val_new, float) else str(val_new)
+
+        if isinstance(val_exist, float) and isinstance(val_new, float):
+            is_match = abs(val_exist - val_new) < 0.00001
+        else:
+            is_match = (val_exist == val_new)
+
+        if is_match:
+            status = "✓ Unchanged"
+        else:
+            status = "⚡ MODIFIED"
+            changes_count += 1
+
+        print(f"{key:<42} | {str_exist:<14} | {str_new:<14} | {status}")
+
+    print("=" * 84)
+    if is_dry_run:
+        print(f"DRY RUN: {changes_count} change(s) detected. No files modified.")
+    else:
+        if changes_count > 0:
+            print(f"ACTION: {changes_count} change(s) committed to {JSON_FILE}.")
+        else:
+            print("ACTION: No changes detected. File is identical.")
+    print("=" * 84 + "\n")
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--dry-run", action="store_true", help="Print comparison report without writing to disk")
     args = parser.parse_args()
 
     tmp_xlsx = os.path.join(SCRIPT_DIR, "pge_temp.xlsx")
     download_xlsx(XLSX_URL, tmp_xlsx)
     
     try:
-        new_data, b_credit, new_allowances, fixed_fees = parse_pge_xlsx(tmp_xlsx)
-        new_data = cleanup_bins(new_data)
+        new_plans, b_credit, new_allowances, fixed_fees = parse_pge_xlsx(tmp_xlsx)
+        new_plans = cleanup_bins(new_plans)
         solar_rates = fetch_pge_solar_clawback_rates()
-        cca_data = fetch_pge_cca_pdf_rates() # Live CCA PDF Fetch
+        cca_data = fetch_pge_cca_pdf_rates()
     except Exception as e:
         print(f"[Error] Parser Failure: {e}")
         if os.path.exists(tmp_xlsx): os.remove(tmp_xlsx)
         return
 
-    if not os.path.exists(JSON_FILE): return
+    existing_json = {}
+    if os.path.exists(JSON_FILE):
+        with open(JSON_FILE, 'r') as f:
+            existing_json = json.load(f)
 
-    with open(JSON_FILE, 'r') as f:
-        current_json = json.load(f)
+    updated_json = json.loads(json.dumps(existing_json))
+    updated_json["lastUpdated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    updated = False
-    
-    # 1. Update Global Baseline Credit
-    if b_credit:
-        old_bc = current_json.get("baselineCredit", 0)
-        if abs(b_credit - old_bc) > 0.0001:
-            if not args.dry_run: current_json["baselineCredit"] = b_credit
-            updated = True
+    # 1. Baseline Credit
+    if b_credit: updated_json["baselineCredit"] = b_credit
 
-    # 2. Update Fixed Fees
-    if "fixed" not in current_json: current_json["fixed"] = {}
-    for key, val in fixed_fees.items():
-        curr_val = current_json["fixed"].get(key, 0.0)
-        if abs(val - curr_val) > 0.0001:
-            if not args.dry_run: current_json["fixed"][key] = val
-            updated = True
+    # 2. Fixed Fees
+    if "fixed" not in updated_json: updated_json["fixed"] = {}
+    for k, v in fixed_fees.items(): updated_json["fixed"][k] = v
 
-    # 3. Update Solar Rates
-    if "nscRate" in solar_rates and abs(solar_rates["nscRate"] - current_json.get("nscRate", 0.0)) > 0.0001:
-        if not args.dry_run: current_json["nscRate"] = solar_rates["nscRate"]
-        updated = True
+    # 3. Solar Rates
+    if "nscRate" in solar_rates: updated_json["nscRate"] = solar_rates["nscRate"]
+    if "sbpExportRate" in solar_rates: updated_json["sbpExportRate"] = solar_rates["sbpExportRate"]
 
-    if "sbpExportRate" in solar_rates and abs(solar_rates["sbpExportRate"] - current_json.get("sbpExportRate", 0.0)) > 0.0001:
-        if not args.dry_run: current_json["sbpExportRate"] = solar_rates["sbpExportRate"]
-        updated = True
-
-    # 4. Update Baseline Allowances
+    # 4. Baseline Allowances
     if new_allowances:
-        if "baselineAllowances" not in current_json: current_json["baselineAllowances"] = {}
+        if "baselineAllowances" not in updated_json: updated_json["baselineAllowances"] = {}
         for t, seasons in new_allowances.items():
-            if t not in current_json["baselineAllowances"]:
-                if not args.dry_run: current_json["baselineAllowances"][t] = seasons
-                updated = True
+            updated_json["baselineAllowances"][t] = seasons
 
-    # 5. Update Plan Rates
-    for plan in ["E-1 tiered", "E-TOU-C", "E-TOU-D", "E-ELEC", "EV2-A", "EV-B"]:
-        if plan not in new_data: continue
-        if "plans" not in current_json: current_json["plans"] = {}
-        if plan not in current_json["plans"]:
-            current_json["plans"][plan] = {"summer": {}, "winter": {}}
-            updated = True
+    # 5. Plan Rates
+    if "plans" not in updated_json: updated_json["plans"] = {}
+    for plan, seasons in new_plans.items():
+        if plan not in updated_json["plans"]: updated_json["plans"][plan] = {}
+        for season, bins in seasons.items():
+            if season not in updated_json["plans"][plan]: updated_json["plans"][plan][season] = {}
+            for b_type, rate in bins.items():
+                if rate > 0: updated_json["plans"][plan][season][b_type] = rate
 
-        for season in ["summer", "winter"]:
-            if season not in current_json["plans"][plan]: current_json["plans"][plan][season] = {}
-            for b_type in ["onPeak", "offPeak", "superOffPeak"]:
-                rate = new_data[plan].get(season, {}).get(b_type, 0)
-                if rate == 0: continue
-                if abs(rate - current_json["plans"][plan][season].get(b_type, 0)) > 0.0001:
-                    if not args.dry_run: current_json["plans"][plan][season][b_type] = rate
-                    updated = True
-
-    # 6. Update CCA Rate Blocks from Live PDF Scan
-    print("\n[CCA Synchronization]")
-    if "cca" not in current_json: current_json["cca"] = {}
+    # 6. CCA Profiles
+    if "cca" not in updated_json: updated_json["cca"] = {}
     for cca_id, profile in cca_data.items():
-        if cca_id not in current_json["cca"]:
-            if not args.dry_run: current_json["cca"][cca_id] = profile
-            updated = True
-            print(f"  + Added CCA profile: {cca_id}")
-        else:
-            print(f"  ✓ Preserved & Synchronized: {cca_id}")
+        updated_json["cca"][cca_id] = profile
 
-    if updated and not args.dry_run:
-        current_json["lastUpdated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # Print Aligned Comparison Table
+    print_comparison_table(existing_json, updated_json, is_dry_run=args.dry_run)
+
+    if not args.dry_run:
         with open(JSON_FILE, 'w') as f:
-            json.dump(current_json, f, indent=2)
-        print("\n>>> Success: pge_rates.json updated.")
-    else:
-        print("\n>>> Result: Completed without committing changes.")
+            json.dump(updated_json, f, indent=2)
 
     if os.path.exists(tmp_xlsx): os.remove(tmp_xlsx)
+
 
 if __name__ == "__main__":
     main()

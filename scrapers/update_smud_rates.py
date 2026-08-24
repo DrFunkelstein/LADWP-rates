@@ -97,7 +97,7 @@ def parse_smud_rates():
                 rates_data["electric"]["rTod"]["nonSummer"]["offPeak"] = float(winter_off.group(1))
 
     except Exception as e:
-        print(f"Notice: TOD details parsing error: {e}.")
+        print(f"Notice: TOD parsing notice: {e}.")
 
     # 2. Fetch Fixed Rate (Schedule R Seasonal Rates)
     try:
@@ -106,20 +106,18 @@ def parse_smud_rates():
             soup_fixed = BeautifulSoup(res_fixed.text, "html.parser")
             text_fixed = soup_fixed.get_text()
 
-            # Summer Fixed Rate (All Day: $0.2189 / 21.89¢)
+            # Summer Fixed Rate ($0.2189)
             summer_fixed = re.search(r"Summer.*?All\s*day.*?\$(\d+\.\d+)", text_fixed, re.IGNORECASE | re.DOTALL)
             if summer_fixed and 0.15 <= float(summer_fixed.group(1)) <= 0.35:
                 rates_data["electric"]["fixedRate"]["summer"] = float(summer_fixed.group(1))
-                print(f"  ✓ Fixed Rate Summer: ${rates_data['electric']['fixedRate']['summer']}/kWh")
 
-            # Non-Summer Fixed Rate (All Day: $0.1371 / 13.71¢)
+            # Non-Summer Fixed Rate ($0.1371)
             winter_fixed = re.search(r"Non-summer.*?All\s*day.*?\$(\d+\.\d+)", text_fixed, re.IGNORECASE | re.DOTALL)
             if winter_fixed and 0.08 <= float(winter_fixed.group(1)) <= 0.25:
                 rates_data["electric"]["fixedRate"]["nonSummer"] = float(winter_fixed.group(1))
-                print(f"  ✓ Fixed Rate Non-Summer: ${rates_data['electric']['fixedRate']['nonSummer']}/kWh")
 
     except Exception as e:
-        print(f"Notice: Fixed rate parsing error: {e}.")
+        print(f"Notice: Fixed rate parsing notice: {e}.")
 
     # 3. Fetch SIFC and Solar Export Rate from Main Page
     try:
@@ -135,27 +133,89 @@ def parse_smud_rates():
                 rates_data["electric"]["ssrSolarExportRate"] = round(float(ssr.group(1)) / 100.0, 4)
 
     except Exception as e:
-        print(f"Notice: Main page SIFC/SSR parsing error: {e}.")
+        print(f"Notice: Main page SIFC/SSR parsing notice: {e}.")
 
     return rates_data
 
 
+def flatten_json(d, parent_key="", sep="."):
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_json(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
+
+
+def print_comparison_table(existing_data, scraped_data):
+    flat_existing = flatten_json(existing_data.get("electric", {}))
+    flat_scraped = flatten_json(scraped_data.get("electric", {}))
+
+    all_keys = sorted(list(set(flat_existing.keys()) | set(flat_scraped.keys())))
+
+    print("\n" + "=" * 80)
+    print(" " * 26 + "SMUD RATE COMPARISON REPORT")
+    print("=" * 80)
+    print(f"{'Tariff Item':<38} | {'Existing File':<14} | {'Scraped Value':<14} | {'Status'}")
+    print("-" * 80)
+
+    changes_detected = False
+
+    for key in all_keys:
+        val_exist = flat_existing.get(key, "N/A")
+        val_scraped = flat_scraped.get(key, "N/A")
+
+        # Format values for display
+        str_exist = f"${val_exist:.4f}" if isinstance(val_exist, (int, float)) else str(val_exist)
+        str_scraped = f"${val_scraped:.4f}" if isinstance(val_scraped, (int, float)) else str(val_scraped)
+
+        if isinstance(val_exist, float) and isinstance(val_scraped, float):
+            is_match = abs(val_exist - val_scraped) < 0.00001
+        else:
+            is_match = (val_exist == val_scraped)
+
+        if is_match:
+            status = "✓ Unchanged"
+        else:
+            status = "⚡ MODIFIED"
+            changes_detected = True
+
+        print(f"{key:<38} | {str_exist:<14} | {str_scraped:<14} | {status}")
+
+    print("=" * 80)
+    if changes_detected:
+        print("ACTION: Rate changes detected. File will be updated.")
+    else:
+        print("ACTION: No rate changes detected. File is identical.")
+    print("=" * 80 + "\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Update SMUD rates JSON")
-    parser.add_argument("--dry-run", action="store_true", help="Print updated JSON without writing to disk")
+    parser.add_argument("--dry-run", action="store_true", help="Print comparison report without writing to disk")
     args = parser.parse_args()
 
-    rates_json = parse_smud_rates()
-    formatted_output = json.dumps(rates_json, indent=2)
+    scraped_rates = parse_smud_rates()
+
+    # Load existing file if it exists
+    existing_rates = {}
+    if os.path.exists(JSON_OUTPUT_PATH):
+        try:
+            with open(JSON_OUTPUT_PATH, "r") as f:
+                existing_rates = json.load(f)
+        except Exception:
+            existing_rates = DEFAULT_RATES
 
     if args.dry_run:
-        print("\n--- DRY RUN OUTPUT ---")
-        print(formatted_output)
+        print_comparison_table(existing_rates, scraped_rates)
     else:
+        formatted_output = json.dumps(scraped_rates, indent=2)
         os.makedirs(os.path.dirname(JSON_OUTPUT_PATH), exist_ok=True)
         with open(JSON_OUTPUT_PATH, "w") as f:
             f.write(formatted_output + "\n")
-        print(f"\nSuccessfully wrote SMUD rates to {JSON_OUTPUT_PATH}")
+        print(f"Successfully wrote updated SMUD rates to {JSON_OUTPUT_PATH}")
 
 
 if __name__ == "__main__":

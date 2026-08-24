@@ -131,6 +131,30 @@
     }
   },
   "cca": {
+    "SJCE": {
+      "name": "San Jose Clean Energy",
+      "fullName": "San Jose Clean Energy (City of San Jose)",
+      "tiers": {
+        "totalgreen": { "name": "TotalGreen (100% Renewable)", "rateAdder": 0.0180 },
+        "greensource": { "name": "GreenSource (62% Clean)", "rateAdder": -0.0050 }
+      }
+    },
+    "3CE_PGE": {
+      "name": "Central Coast Energy",
+      "fullName": "Central Coast Community Energy",
+      "tiers": {
+        "3c_prime": { "name": "3Cprime (100% Clean)", "rateAdder": 0.0150 },
+        "3c_choice": { "name": "3Cchoice (Standard)", "rateAdder": -0.0050 }
+      }
+    },
+    "SCP": {
+      "name": "Sonoma Clean Power",
+      "fullName": "Sonoma Clean Power (Sonoma & Mendocino)",
+      "tiers": {
+        "evergreen": { "name": "Evergreen (100% Local)", "rateAdder": 0.0250 },
+        "cleanstart": { "name": "CleanStart (Default)", "rateAdder": -0.0050 }
+      }
+    },
     "CLEANPOWERSF": {
       "name": "CleanPowerSF",
       "fullName": "CleanPowerSF (San Francisco)",

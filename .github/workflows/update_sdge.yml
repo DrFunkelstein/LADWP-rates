@@ -27,7 +27,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Dependencies
-        run: pip install requests beautifulsoup4 pdfplumber
+        run: pip install requests beautifulsoup4 pdfplumber pypdf
 
       - name: Run Automated Scraper
         # This keeps the dates fresh if no PDF is uploaded

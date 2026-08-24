@@ -29,7 +29,7 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas openpyxl pdfplumber beautifulsoup4
+          pip install requests pandas openpyxl pdfplumber beautifulsoup4 pypdf
 
       - name: Run Automated Scraper
         run: python scrapers/update_pge_rates.py ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}

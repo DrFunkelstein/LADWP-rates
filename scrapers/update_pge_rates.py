@@ -118,39 +118,40 @@ def fetch_pge_cca_pdf_rates():
         soup = BeautifulSoup(res.text, "html.parser")
         pdf_links = {}
 
-        # Scan for PDF links in dropdowns
+        # Scan for PDF links in dropdowns by inspecting both href and visible link text
         for a in soup.find_all("a", href=True):
             href = a["href"]
-            if ".pdf" in href.lower() and "joint" in href.lower() and "rate" in href.lower():
+            text_label = a.get_text().upper()
+            combined = (href + " " + text_label).upper()
+            
+            if ".PDF" in combined and ("COMPARISON" in combined or "RATE" in combined or "JOINT" in combined):
                 full_url = urljoin(PGE_CCA_HUB_URL, href)
-                text_label = a.get_text().upper()
                 
-                if "AVA" in text_label or "AVA" in href.upper(): pdf_links["AVA"] = full_url
-                elif "CLEANPOWERSF" in text_label or "CLEANPOWERSF" in href.upper(): pdf_links["CLEANPOWERSF"] = full_url
-                elif "SAN JOSE" in text_label or "SJCE" in href.upper(): pdf_links["SJCE"] = full_url
-                elif "3CE" in text_label or "3CE" in href.upper(): pdf_links["3CE_PGE"] = full_url
-                elif "MCE" in text_label or "MCE" in href.upper(): pdf_links["MCE"] = full_url
-                elif "SVCE" in text_label or "SVCE" in href.upper(): pdf_links["SVCE"] = full_url
-                elif "PENINSULA" in text_label or "WESTLIGHT" in text_label or "PCE" in href.upper(): pdf_links["PCE"] = full_url
-                elif "SONOMA" in text_label or "SCP" in href.upper(): pdf_links["SCP"] = full_url
+                if "AVA" in combined: pdf_links["AVA"] = full_url
+                elif "CLEANPOWERSF" in combined: pdf_links["CLEANPOWERSF"] = full_url
+                elif "SAN JOSE" in combined or "SJCE" in combined: pdf_links["SJCE"] = full_url
+                elif "3CE" in combined or "CCCE" in combined: pdf_links["3CE_PGE"] = full_url
+                elif "MCE" in combined or "MARIN" in combined: pdf_links["MCE"] = full_url
+                elif "SVCE" in combined or "SILICON VALLEY" in combined: pdf_links["SVCE"] = full_url
+                elif "PENINSULA" in combined or "WESTLIGHT" in combined or "PCE" in combined: pdf_links["PCE"] = full_url
+                elif "SONOMA" in combined or "SCP" in combined: pdf_links["SCP"] = full_url
 
         print(f"  > Discovered {len(pdf_links)} Live PG&E CCA Rate Comparison PDFs")
+        for k, v in pdf_links.items():
+            print(f"    ✓ {k}: {v}")
 
         try:
             import pypdf
             for cca_key, pdf_url in pdf_links.items():
-                print(f"    -> Parsing {cca_key} JRC PDF: {pdf_url}")
                 p_res = requests.get(pdf_url, headers=HEADERS, timeout=15)
                 if p_res.status_code == 200:
                     reader = pypdf.PdfReader(io.BytesIO(p_res.content))
                     pdf_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-                    
-                    # Scan for rate differentials / generation comparison lines
                     matches = re.findall(r"\$?0\.0\d{3,5}", pdf_text)
                     if matches:
-                        print(f"      ✓ Successfully validated live rate tables for {cca_key}")
+                        print(f"      ✓ Successfully parsed live rate table for {cca_key}")
         except ImportError:
-            print("  [Notice] pypdf not available. Using validated default profiles.")
+            print("  [Notice] pypdf not available locally (run 'pip install pypdf'). Using validated default profiles.")
 
     except Exception as e:
         print(f"  [Warning] CCA Crawler error: {e}. Retaining validated defaults.")

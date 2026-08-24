@@ -136,9 +136,8 @@ def fetch_sdge_nsc_rate():
                                     extracted = float(m_match.group(1))
                                     val = extracted / 100 if extracted > 0.5 else extracted
                                     if val > 0.001:
-                                        nsc_rate = val
                                         print(f"  > Parsed SDG&E NSC Rate for {target_m}: ${val:.5f}/kWh")
-                                        return nsc_rate
+                                        return val
     except Exception as e:
         print(f"  [Warning] Excess Generation fetch notice: {e}")
         
@@ -227,7 +226,7 @@ def main():
     updated_json["sbpGenerationExportRate"] = existing_json.get("sbpGenerationExportRate", 0.09065)
     updated_json["sbpExportRate"] = round(updated_json["sbpDeliveryExportRate"] + updated_json["sbpGenerationExportRate"], 5)
 
-    # 2. TOU Plans
+    # 2. TOU Plans (Fixed Column Mapping: [Super Off-Peak, Off-Peak, On-Peak])
     for app_id, modal_id in PLAN_MAP.items():
         modal = soup.find('div', {'id': modal_id})
         if not modal: continue
@@ -244,11 +243,24 @@ def main():
             if target_row:
                 cells = target_row.find_all('td')
                 found_rates = [extract_cents(c.get_text()) for c in cells if extract_cents(c.get_text())]
-                if len(found_rates) >= 2 and app_id in updated_json["plans"]:
-                    new_on = found_rates[-1]
+                
+                if len(found_rates) >= 3 and app_id in updated_json["plans"]:
+                    # Correct SDG&E Table Order
+                    new_super = found_rates[0]
+                    new_off = found_rates[1]
+                    new_on = found_rates[2]
+                    
                     updated_json["plans"][app_id][season]["onPeak"] = new_on
-                    updated_json["plans"][app_id][season]["offPeak"] = found_rates[0]
-                    updated_json["plans"][app_id][season]["superOffPeak"] = found_rates[0] if len(found_rates) < 3 else found_rates[1]
+                    updated_json["plans"][app_id][season]["offPeak"] = new_off
+                    updated_json["plans"][app_id][season]["superOffPeak"] = new_super
+                    
+                elif len(found_rates) == 2 and app_id in updated_json["plans"]:
+                    new_off = found_rates[0]
+                    new_on = found_rates[1]
+                    
+                    updated_json["plans"][app_id][season]["onPeak"] = new_on
+                    updated_json["plans"][app_id][season]["offPeak"] = new_off
+                    updated_json["plans"][app_id][season]["superOffPeak"] = new_off
 
     # 3. CCA Sync
     cca_data = fetch_sdge_cca_pdf_rates()

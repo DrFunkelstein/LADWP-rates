@@ -1,230 +1,481 @@
-#!/usr/bin/env python3
-"""
-PG&E Residential Rates Scraper
-Fetches and updates residential electricity, gas, and CCA tariffs for Pacific Gas & Electric.
-"""
-
 import os
-import re
 import json
-import argparse
-import datetime
+import sys
+import io
+import re
 import requests
-from bs4 import BeautifulSoup
+import pandas as pd
+import argparse
+from datetime import datetime
 
-JSON_OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "..", "rates", "pge_rates.json")
+# --- CONFIGURATION ---
+XLSX_URL = "https://www.pge.com/assets/rates/tariffs/res-inclu-tou-current.xlsx"
+PGE_NSC_PDF_URL = "https://www.pge.com/assets/pge/docs/clean-energy/solar/AB920-RateTable.pdf"
 
-# Verified Baseline Fallback Database
-DEFAULT_PGE_RATES = {
-    "lastUpdated": datetime.datetime.now().strftime("%Y-%m-%d"),
-    "nbcRate": 0.02154,
-    "baselineCredit": 0.08140,
-    "sbpExportRate": 0.07500,
-    "nscRate": 0.03200,
-    "fixed": {
-        "baseServiceStandard": 0.8050,
-        "baseServiceFERA": 0.4000,
-        "baseServiceCARE": 0.2000,
-        "evbMeterCharge": 0.4130
-    },
-    "baselineAllowances": {
-        "T": {
-            "summer": {"basic": 6.5, "allElectric": 7.1},
-            "winter": {"basic": 7.5, "allElectric": 12.9}
-        },
-        "P": {
-            "summer": {"basic": 13.5, "allElectric": 15.2},
-            "winter": {"basic": 11.0, "allElectric": 26.0}
-        },
-        "R": {
-            "summer": {"basic": 17.7, "allElectric": 19.9},
-            "winter": {"basic": 10.4, "allElectric": 26.7}
-        },
-        "S": {
-            "summer": {"basic": 15.0, "allElectric": 17.8},
-            "winter": {"basic": 10.2, "allElectric": 23.7}
-        },
-        "X": {
-            "summer": {"basic": 9.8, "allElectric": 8.5},
-            "winter": {"basic": 9.7, "allElectric": 14.6}
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+JSON_FILE = os.path.normpath(os.path.join(ROOT_DIR, "rates", "pge_rates.json"))
+
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
+
+# Verified Default CCA Profiles for PG&E Territory (Joint Rate Comparisons)
+DEFAULT_PGE_CCA_PROFILES = {
+    "CLEANPOWERSF": {
+        "name": "CleanPowerSF",
+        "fullName": "CleanPowerSF (San Francisco)",
+        "tiers": {
+            "supergreen": {"name": "SuperGreen (100%)", "rateAdder": 0.0200},
+            "green": {"name": "Green (50%)", "rateAdder": -0.0050}
         }
     },
-    "plans": {
-        "E-TOU-C": {
-            "summer": {"onPeak": 0.52240, "offPeak": 0.39940, "superOffPeak": None},
-            "winter": {"onPeak": 0.39757, "offPeak": 0.36757, "superOffPeak": None}
-        },
-        "E-TOU-D": {
-            "summer": {"onPeak": 0.47708, "offPeak": 0.34212, "superOffPeak": None},
-            "winter": {"onPeak": 0.38747, "offPeak": 0.34886, "superOffPeak": None}
-        },
-        "E-ELEC": {
-            "summer": {"onPeak": 0.55214, "offPeak": 0.39026, "superOffPeak": 0.33358},
-            "winter": {"onPeak": 0.32063, "offPeak": 0.29854, "superOffPeak": 0.28468}
-        },
-        "EV2-A": {
-            "summer": {"onPeak": 0.53809, "offPeak": 0.42760, "superOffPeak": 0.22558},
-            "winter": {"onPeak": 0.41099, "offPeak": 0.39428, "superOffPeak": 0.22558}
-        },
-        "EV-B": {
-            "summer": {"onPeak": 0.62131, "offPeak": 0.37720, "superOffPeak": 0.26465},
-            "winter": {"onPeak": 0.43878, "offPeak": 0.30677, "superOffPeak": 0.23504}
-        },
-        "E-1 tiered": {
-            "summer": {"onPeak": 0.40702, "offPeak": 0.32561, "superOffPeak": None},
-            "winter": {"onPeak": 0.40702, "offPeak": 0.32561, "superOffPeak": None}
+    "AVA": {
+        "name": "Ava Community Energy",
+        "fullName": "Ava Community Energy (East Bay / Alameda)",
+        "tiers": {
+            "renewable100": {"name": "Renewable 100", "rateAdder": 0.0150},
+            "bright_choice": {"name": "Bright Choice", "rateAdder": -0.0075}
         }
     },
-    "gas": {
-        "procurement": 0.48122,
-        "transportation": {
-            "tier1": 1.05432,
-            "tier2": 1.58211
-        },
-        "allowances": {
-            "winter": 1.95,
-            "summer": 0.45
+    "PCE": {
+        "name": "Peninsula Clean Energy",
+        "fullName": "Peninsula Clean Energy (San Mateo County)",
+        "tiers": {
+            "ecogreen": {"name": "ECO100 (100% Renewable)", "rateAdder": 0.0100},
+            "ecoplus": {"name": "ECOplus (50% Renewable)", "rateAdder": -0.0100}
         }
     },
-    "cca": {
-        "CLEANPOWERSF": {
-            "name": "CleanPowerSF",
-            "fullName": "CleanPowerSF (San Francisco)",
-            "pciaRate": 0.0185,
-            "tiers": {
-                "supergreen": {"name": "SuperGreen (100%)", "rateAdder": 0.0200},
-                "green": {"name": "Green (50%)", "rateAdder": -0.0050}
-            }
-        },
-        "AVA": {
-            "name": "Ava Community Energy",
-            "fullName": "Ava Community Energy (East Bay / Alameda)",
-            "pciaRate": 0.0185,
-            "tiers": {
-                "renewable100": {"name": "Renewable 100", "rateAdder": 0.0150},
-                "bright_choice": {"name": "Bright Choice", "rateAdder": -0.0075}
-            }
-        },
-        "PCE": {
-            "name": "Peninsula Clean Energy",
-            "fullName": "Peninsula Clean Energy (San Mateo County)",
-            "pciaRate": 0.0185,
-            "tiers": {
-                "ecogreen": {"name": "ECO100 (100% Renewable)", "rateAdder": 0.0100},
-                "ecoplus": {"name": "ECOplus (50% Renewable)", "rateAdder": -0.0100}
-            }
-        },
-        "MCE": {
-            "name": "MCE Clean Energy",
-            "fullName": "MCE (Marin, Napa, Solano, Contra Costa)",
-            "pciaRate": 0.0185,
-            "tiers": {
-                "deep_green": {"name": "Deep Green (100%)", "rateAdder": 0.0150},
-                "light_green": {"name": "Light Green (60%)", "rateAdder": 0.0}
-            }
-        },
-        "SVCE": {
-            "name": "Silicon Valley Clean Energy",
-            "fullName": "Silicon Valley Clean Energy (Santa Clara County)",
-            "pciaRate": 0.0185,
-            "tiers": {
-                "greenprime": {"name": "GreenPrime (100%)", "rateAdder": 0.0150},
-                "greenstart": {"name": "GreenStart (Standard)", "rateAdder": 0.0}
-            }
+    "MCE": {
+        "name": "MCE Clean Energy",
+        "fullName": "MCE (Marin, Napa, Solano, Contra Costa)",
+        "tiers": {
+            "deep_green": {"name": "Deep Green (100%)", "rateAdder": 0.0150},
+            "light_green": {"name": "Light Green (60%)", "rateAdder": 0.0000}
+        }
+    },
+    "SVCE": {
+        "name": "Silicon Valley Clean Energy",
+        "fullName": "Silicon Valley Clean Energy (Santa Clara County)",
+        "tiers": {
+            "greenprime": {"name": "GreenPrime (100%)", "rateAdder": 0.0150},
+            "greenstart": {"name": "GreenStart (Standard)", "rateAdder": 0.0000}
         }
     }
 }
 
+def download_xlsx(url, save_path):
+    print(f"[Network] Downloading XLSX from: {url}")
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+        with open(save_path, 'wb') as f:
+            f.write(response.content)
+        print(f"[Network] Download complete ({len(response.content)} bytes)")
+    except Exception as e:
+        print(f"[Error] Failed to download XLSX: {e}")
+        sys.exit(1)
 
-def parse_pge_rates():
-    rates_data = json.loads(json.dumps(DEFAULT_PGE_RATES))
-    rates_data["lastUpdated"] = datetime.datetime.now().strftime("%Y-%m-%d")
+def clean_val(val):
+    if pd.isna(val) or str(val).strip() in ["", "-", "None"]: return 0.0
+    s = str(val).replace('$', '').replace(',', '').strip()
+    if '(' in s and ')' in s:
+        s = "-" + s.replace('(', '').replace(')', '')
+    try:
+        return float(s)
+    except:
+        return 0.0
 
-    # Preserve existing file's dynamic CCA blocks if available
-    if os.path.exists(JSON_OUTPUT_PATH):
-        try:
-            with open(JSON_OUTPUT_PATH, "r") as f:
-                existing = json.load(f)
-                if "cca" in existing and existing["cca"]:
-                    rates_data["cca"] = existing["cca"]
-        except Exception as e:
-            print(f"Notice: Preserving default CCA schema: {e}")
-
-    return rates_data
-
-
-def flatten_json(d, parent_key="", sep="."):
-    items = []
-    for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, dict):
-            items.extend(flatten_json(v, new_key, sep=sep).items())
+def fetch_pge_solar_clawback_rates():
+    """
+    Downloads and parses PG&E's AB 920 Net Surplus Compensation (NSC) rate PDF.
+    Extracts the latest published $/kWh value from the table.
+    """
+    print("\n[Solar Scan] Checking PG&E AB920 NSC Rate Table PDF...")
+    
+    nsc_rate = 0.03200        # Verified fallback
+    sbp_export_rate = 0.07500 # CPUC Avoided Cost benchmark export credit
+    
+    try:
+        res = requests.get(PGE_NSC_PDF_URL, headers=HEADERS, timeout=20)
+        if res.status_code == 200:
+            try:
+                import pypdf
+                reader = pypdf.PdfReader(io.BytesIO(res.content))
+                text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+            except ImportError:
+                text = res.content.decode('latin1', errors='ignore')
+            
+            matches = re.findall(r"\$?0\.0\d{3,5}", text)
+            if matches:
+                cleaned = [float(m.replace("$", "")) for m in matches if float(m.replace("$", "")) > 0.005]
+                if cleaned:
+                    nsc_rate = cleaned[-1]
+                    print(f"  > Parsed Latest PG&E NSC Rate from PDF: ${nsc_rate:.5f}/kWh")
+            else:
+                print(f"  > Retaining Verified Fallback NSC Rate: ${nsc_rate:.5f}/kWh")
         else:
-            items.append((new_key, v))
-    return dict(items)
+            print(f"  [Warning] HTTP {res.status_code} fetching NSC PDF. Retaining fallback.")
+    except Exception as e:
+        print(f"  [Warning] Failed to fetch/parse NSC PDF ({e}). Retaining fallback.")
 
+    return {
+        "nscRate": nsc_rate,
+        "sbpExportRate": sbp_export_rate
+    }
 
-def print_comparison_table(existing_data, scraped_data):
-    flat_existing = flatten_json(existing_data)
-    flat_scraped = flatten_json(scraped_data)
+def parse_pge_baseline_allowances(xlsx):
+    """
+    Parses daily baseline allowances from sheet: ElecBaselineEffec220601-Present
+    Layout: Winter on left (cols 0-3), Summer on right (cols 4-7)
+    Captures 'Individually Metered (Daily)' for Code H (All Elec) and Code B (Basic Elec)
+    across territories T, P, R, S, X.
+    """
+    print("\n[Excel Scan] Scanning Baseline Quantities Sheet...")
+    extracted_allowances = {t: {"summer": {}, "winter": {}} for t in ["T", "P", "R", "S", "X"]}
+    territories = ["T", "P", "R", "S", "X"]
+    
+    target_sheet = None
+    for name in xlsx.sheet_names:
+        if "ElecBaseline" in name or "Baseline" in name:
+            target_sheet = name
+            break
+            
+    if not target_sheet:
+        print("  [Warning] Baseline sheet not found in workbook.")
+        return {}
 
-    all_keys = sorted(list(set(flat_existing.keys()) | set(flat_scraped.keys())))
+    print(f"  > Target Sheet Found: '{target_sheet}'")
+    df = xlsx.parse(target_sheet, header=None)
 
-    print("\n" + "=" * 85)
-    print(" " * 28 + "PG&E RATE COMPARISON REPORT")
-    print("=" * 85)
-    print(f"{'Tariff / CCA Item':<45} | {'Existing':<12} | {'Scraped':<12} | {'Status'}")
-    print("-" * 85)
+    current_code_left = "allElectric"
+    current_code_right = "allElectric"
 
-    changes_detected = False
+    for idx, row in df.iterrows():
+        row_str = " ".join([str(cell) for cell in row.dropna().tolist()])
+        
+        if "CODE H" in row_str.upper() or "ALL ELEC" in row_str.upper():
+            current_code_left = "allElectric"
+            current_code_right = "allElectric"
+        elif "CODE B" in row_str.upper() or "BASIC ELEC" in row_str.upper():
+            current_code_left = "basic"
+            current_code_right = "basic"
 
-    for key in all_keys:
-        val_exist = flat_existing.get(key, "N/A")
-        val_scraped = flat_scraped.get(key, "N/A")
+        for col_idx, cell in enumerate(row):
+            cell_str = str(cell).strip().upper()
+            
+            t_match = None
+            if cell_str in territories:
+                t_match = cell_str
+            elif cell_str.startswith("TERRITORY "):
+                t = cell_str.replace("TERRITORY ", "").strip()
+                if t in territories: t_match = t
 
-        str_exist = f"${val_exist:.4f}" if isinstance(val_exist, (int, float)) else str(val_exist)
-        str_scraped = f"${val_scraped:.4f}" if isinstance(val_scraped, (int, float)) else str(val_scraped)
+            if t_match:
+                numeric_vals = []
+                for val_idx in range(col_idx + 1, min(col_idx + 4, len(row))):
+                    v = clean_val(row.iloc[val_idx])
+                    if v > 0:
+                        numeric_vals.append(v)
+                
+                if numeric_vals:
+                    individually_metered_val = numeric_vals[0]
+                    is_summer_side = col_idx >= 4
+                    
+                    season = "summer" if is_summer_side else "winter"
+                    code_type = current_code_right if is_summer_side else current_code_left
+                    
+                    extracted_allowances[t_match][season][code_type] = individually_metered_val
+                    print(f"    [Captured] Territory {t_match} ({season:6} - {code_type:11}): {individually_metered_val} kWh/day")
 
-        if isinstance(val_exist, float) and isinstance(val_scraped, float):
-            is_match = abs(val_exist - val_scraped) < 0.00001
-        else:
-            is_match = (val_exist == val_scraped)
+    valid_result = {t: data for t, data in extracted_allowances.items() 
+                    if "basic" in data["summer"] or "allElectric" in data["summer"]}
+    return valid_result
 
-        status = "✓ Unchanged" if is_match else "⚡ MODIFIED"
-        if not is_match:
-            changes_detected = True
+def parse_pge_xlsx(file_path):
+    print(f"\n[Excel Scan] Processing workbook...")
+    xlsx = pd.ExcelFile(file_path)
+    extracted_data = {}
+    baseline_credit_found = None
+    
+    # Defaults for Base Services & Meter Charges ($/day)
+    fixed_fees = {
+        "baseServiceStandard": 24.15 / 30.0, # $0.80500/day
+        "baseServiceFERA":     12.00 / 30.0, # $0.40000/day
+        "baseServiceCARE":      6.00 / 30.0, # $0.20000/day
+        "evbMeterCharge":      0.41300       # $0.41300/day
+    }
 
-        print(f"{key:<45} | {str_exist:<12} | {str_scraped:<12} | {status}")
+    plan_identities = {
+        "E-1 tiered": ["Residential Schedules", "E1,"],
+        "E-TOU-C": ["Rate Schedule E-TOU-C"],
+        "E-TOU-D": ["Rate Schedule E-TOU-D"],
+        "E-ELEC": ["Rate Schedule E-ELEC"],
+        "EV2-A": ["Rate Schedule EV2"],
+        "EV-B": ["EV, Rate B"]
+    }
+    
+    exclusion_markers = ["EM", "EM-TOU", "ES,", "ET,", "Master"]
 
-    print("=" * 85)
-    print("ACTION: Rate changes detected. File will update." if changes_detected else "ACTION: No changes. Identical.")
-    print("=" * 85 + "\n")
+    for sheet_name in xlsx.sheet_names:
+        print(f"  > Scanning Sheet: {sheet_name}")
+        df = xlsx.parse(sheet_name, header=None)
+        
+        current_plan_id = None
+        current_season = "summer"
 
+        for idx, row in df.iterrows():
+            first_cell = str(row.iloc[0]).strip()
+            row_str = " ".join([str(i) for i in row.dropna().tolist()])
+            row_upper = row_str.upper()
 
+            # --- 1. Targeted Fixed & Meter Charge Extraction ---
+            if "EV, RATE B" in row_upper or "EV-B" in row_upper:
+                if ("METER CHARGE" in row_upper or "CUSTOMER CHARGE" in row_upper) and not any(p in row_upper for p in ["PEAK", "OFF-PEAK", "TIER"]):
+                    for c in row:
+                        val = clean_val(c)
+                        if 0.10 <= val <= 1.50:
+                            fixed_fees["evbMeterCharge"] = val
+                            print(f"    [Captured] EV-B Dedicated Meter Charge: ${val:.5f}/day")
+                            break
+
+            if ("BASE SERVICE CHARGE" in row_upper or "BASE SERVICES CHARGE" in row_upper) and not any(p in row_upper for p in ["PEAK", "OFF-PEAK", "TIER", "SCHEDULE"]):
+                found_numbers = [clean_val(c) for c in row if clean_val(c) > 0]
+                for val in found_numbers:
+                    if 20.0 <= val <= 30.0:
+                        fixed_fees["baseServiceStandard"] = round(val / 30.0, 5)
+                        print(f"    [Captured] Base Services Charge (Standard): ${val:.2f}/mo (${fixed_fees['baseServiceStandard']:.5f}/day)")
+                    elif 10.0 <= val <= 15.0:
+                        fixed_fees["baseServiceFERA"] = round(val / 30.0, 5)
+                        print(f"    [Captured] Base Services Charge (FERA): ${val:.2f}/mo (${fixed_fees['baseServiceFERA']:.5f}/day)")
+                    elif 4.0 <= val <= 8.0:
+                        fixed_fees["baseServiceCARE"] = round(val / 30.0, 5)
+                        print(f"    [Captured] Base Services Charge (CARE): ${val:.2f}/mo (${fixed_fees['baseServiceCARE']:.5f}/day)")
+                    elif 0.60 <= val <= 1.00:
+                        fixed_fees["baseServiceStandard"] = val
+                        print(f"    [Captured] Base Services Charge (Daily): ${val:.5f}/day")
+
+            # --- 2. Plan Header Identification ---
+            found_anchor = False
+            for json_id, markers in plan_identities.items():
+                if any(m in first_cell for m in markers):
+                    if not any(ex in first_cell for ex in exclusion_markers) or "E1" in first_cell:
+                        current_plan_id = json_id
+                        found_anchor = True
+                        if current_plan_id not in extracted_data:
+                            extracted_data[current_plan_id] = {"summer": {}, "winter": {}}
+                        print(f"    [Found] {json_id} block start (Row {idx})")
+                        break
+            
+            if not found_anchor and any(ex in first_cell for ex in exclusion_markers) and "E1" not in first_cell:
+                if current_plan_id:
+                    print(f"    [Boundary] Stopping data collection at row {idx} due to non-residential marker: {first_cell}")
+                current_plan_id = None
+                continue
+
+            if not current_plan_id: continue
+
+            if "Summer" in row_str: current_season = "summer"
+            elif "Winter" in row_str: current_season = "winter"
+
+            if current_plan_id == "E-1 tiered":
+                if "Tiered Energy Charges" in row_str:
+                    t1 = clean_val(row.iloc[8])
+                    t2 = clean_val(row.iloc[9])
+                    if t1 > 0:
+                        extracted_data["E-1 tiered"]["summer"] = {"onPeak": t2, "offPeak": t1}
+                        extracted_data["E-1 tiered"]["winter"] = {"onPeak": t2, "offPeak": t1}
+                        print(f"      -> Captured Res E-1: T1={t1}, T2={t2}")
+                continue
+
+            is_ev_tech = any(x in current_plan_id for x in ["EV", "ELEC"])
+            period_col = 7 if is_ev_tech else 8
+            rate_col = 8 if is_ev_tech else 9
+            
+            if len(row) > max(period_col, rate_col):
+                period_cell = str(row.iloc[period_col]).strip()
+                
+                if "Peak" in period_cell:
+                    rate = clean_val(row.iloc[rate_col])
+                    if rate > 0:
+                        if period_cell == "Peak":
+                            extracted_data[current_plan_id][current_season]["onPeak"] = rate
+                        elif period_cell == "Off-Peak":
+                            key = "superOffPeak" if is_ev_tech else "offPeak"
+                            extracted_data[current_plan_id][current_season][key] = rate
+                        elif period_cell in ["Partial-Peak", "Part-Peak"]:
+                            extracted_data[current_plan_id][current_season]["offPeak"] = rate
+                        
+                        print(f"      -> {current_plan_id} {current_season} {period_cell}: {rate}")
+
+                    if current_plan_id == "E-TOU-C" and len(row) > 10:
+                        b_val = clean_val(row.iloc[10])
+                        if b_val < 0: baseline_credit_found = abs(b_val)
+
+    # Extract Baseline Allowances
+    extracted_allowances = parse_pge_baseline_allowances(xlsx)
+
+    return extracted_data, baseline_credit_found, extracted_allowances, fixed_fees
+
+def cleanup_bins(data):
+    two_tier_plans = ["E-1 tiered", "E-TOU-C", "E-TOU-D"]
+    for plan_id in two_tier_plans:
+        if plan_id in data:
+            for season in ["summer", "winter"]:
+                if season in data[plan_id]:
+                    data[plan_id][season]["superOffPeak"] = 0.0
+    return data
+    
 def main():
-    parser = argparse.ArgumentParser(description="Update PG&E rates JSON")
-    parser.add_argument("--dry-run", action="store_true", help="Print report without writing to disk")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    scraped_rates = parse_pge_rates()
+    if args.dry_run: print("\n!!! DRY RUN MODE: No files will be modified !!!")
 
-    existing_rates = {}
-    if os.path.exists(JSON_OUTPUT_PATH):
-        try:
-            with open(JSON_OUTPUT_PATH, "r") as f:
-                existing_rates = json.load(f)
-        except Exception:
-            existing_rates = DEFAULT_PGE_RATES
+    tmp_xlsx = os.path.join(SCRIPT_DIR, "pge_temp.xlsx")
+    download_xlsx(XLSX_URL, tmp_xlsx)
+    
+    try:
+        new_data, b_credit, new_allowances, fixed_fees = parse_pge_xlsx(tmp_xlsx)
+        new_data = cleanup_bins(new_data)
+        solar_rates = fetch_pge_solar_clawback_rates()
+    except Exception as e:
+        print(f"[Error] Parser Failure: {e}")
+        if os.path.exists(tmp_xlsx): os.remove(tmp_xlsx)
+        return
 
-    if args.dry_run:
-        print_comparison_table(existing_rates, scraped_rates)
+    if not os.path.exists(JSON_FILE):
+        print(f"[Error] {JSON_FILE} not found.")
+        return
+
+    with open(JSON_FILE, 'r') as f:
+        current_json = json.load(f)
+
+    print("\n[Comparison Ledger: JSON vs Source]")
+    updated = False
+    
+    # 1. Update Global Baseline Credit
+    if b_credit:
+        old_bc = current_json.get("baselineCredit", 0)
+        diff = abs(b_credit - old_bc)
+        status = "[MATCH]" if diff < 0.0001 else "[CHANGE]"
+        print(f"  {status} Global Baseline Credit: JSON=${old_bc:.5f} | Source=${b_credit:.5f}")
+        if diff > 0.0001:
+            if not args.dry_run: current_json["baselineCredit"] = b_credit
+            updated = True
+
+    # 2. Update Fixed & Base Services Charges
+    if "fixed" not in current_json:
+        current_json["fixed"] = {}
+    
+    for key, val in fixed_fees.items():
+        curr_val = current_json["fixed"].get(key, 0.0)
+        diff = abs(val - curr_val)
+        status = "[MATCH]" if diff < 0.0001 else "[CHANGE]"
+        print(f"  {status} Fixed Fee ({key:20}): JSON=${curr_val:.5f} | Source=${val:.5f}/day")
+        if diff > 0.0001:
+            if not args.dry_run: current_json["fixed"][key] = val
+            updated = True
+
+    # 3. Update Solar Claw-Back & NSC Rates
+    if "nscRate" in solar_rates:
+        curr_nsc = current_json.get("nscRate", 0.0)
+        diff = abs(solar_rates["nscRate"] - curr_nsc)
+        status = "[MATCH]" if diff < 0.0001 else "[CHANGE]"
+        print(f"  {status} Net Surplus Compensation (NSC): JSON=${curr_nsc:.5f} | Source=${solar_rates['nscRate']:.5f}/kWh")
+        if diff > 0.0001:
+            if not args.dry_run: current_json["nscRate"] = solar_rates["nscRate"]
+            updated = True
+
+    if "sbpExportRate" in solar_rates:
+        curr_sbp = current_json.get("sbpExportRate", 0.0)
+        diff = abs(solar_rates["sbpExportRate"] - curr_sbp)
+        status = "[MATCH]" if diff < 0.0001 else "[CHANGE]"
+        print(f"  {status} SBP Avoided Cost Export Rate: JSON=${curr_sbp:.5f} | Source=${solar_rates['sbpExportRate']:.5f}/kWh")
+        if diff > 0.0001:
+            if not args.dry_run: current_json["sbpExportRate"] = solar_rates["sbpExportRate"]
+            updated = True
+
+    # 4. Update Baseline Allowances Table
+    if new_allowances:
+        if "baselineAllowances" not in current_json:
+            current_json["baselineAllowances"] = {}
+        
+        for t, seasons in new_allowances.items():
+            if t not in current_json["baselineAllowances"]:
+                current_json["baselineAllowances"][t] = seasons
+                updated = True
+                print(f"  [NEW] Added Baseline Territory {t} to JSON")
+            else:
+                for season in ["summer", "winter"]:
+                    for code in ["basic", "allElectric"]:
+                        val = seasons.get(season, {}).get(code, 0)
+                        if val > 0:
+                            curr_val = current_json["baselineAllowances"][t].get(season, {}).get(code, 0)
+                            if abs(val - curr_val) > 0.01:
+                                print(f"  [CHANGE] Territory {t} ({season:6} {code:11}): {curr_val} -> {val} kWh/day")
+                                if not args.dry_run:
+                                    current_json["baselineAllowances"][t][season][code] = val
+                                updated = True
+
+    # 5. Update Plan Rates
+    for plan in ["E-1 tiered", "E-TOU-C", "E-TOU-D", "E-ELEC", "EV2-A", "EV-B"]:
+        if plan not in new_data: continue
+        
+        if "plans" not in current_json:
+            current_json["plans"] = {}
+        if plan not in current_json["plans"]:
+            current_json["plans"][plan] = {"summer": {}, "winter": {}}
+            updated = True
+            print(f"  [NEW] Added Plan '{plan}' to JSON")
+
+        for season in ["summer", "winter"]:
+            if season not in current_json["plans"][plan]:
+                current_json["plans"][plan][season] = {}
+
+            p_res = new_data[plan].get(season, {})
+            for b_type in ["onPeak", "offPeak", "superOffPeak"]:
+                rate = p_res.get(b_type, 0)
+                if rate == 0: continue
+                
+                current_val = current_json["plans"][plan][season].get(b_type, 0)
+                diff = abs(rate - current_val)
+                status = "[MATCH]" if diff < 0.0001 else "[CHANGE DETECTED]"
+                
+                print(f"  {status} {plan:12} ({season:6} {b_type:12}): JSON=${current_val:.5f} | XLSX=${rate:.5f}")
+
+                if diff > 0.0001: 
+                    current_json["plans"][plan][season][b_type] = rate
+                    updated = True
+
+    # 6. Preserve & Merge CCA Rate Blocks
+    print("\n[CCA Protection Ledger]")
+    if "cca" not in current_json or not current_json["cca"]:
+        if not args.dry_run:
+            current_json["cca"] = DEFAULT_PGE_CCA_PROFILES
+        updated = True
+        print("  [NEW] Initialized Default PG&E CCA Profiles (CleanPowerSF, Ava, PCE, MCE, SVCE)")
     else:
-        formatted_output = json.dumps(scraped_rates, indent=2)
-        os.makedirs(os.path.dirname(JSON_OUTPUT_PATH), exist_ok=True)
-        with open(JSON_OUTPUT_PATH, "w") as f:
-            f.write(formatted_output + "\n")
-        print(f"Successfully wrote PG&E rates to {JSON_OUTPUT_PATH}")
+        # Verify all default CCAs are present
+        for cca_key, cca_val in DEFAULT_PGE_CCA_PROFILES.items():
+            if cca_key not in current_json["cca"]:
+                if not args.dry_run:
+                    current_json["cca"][cca_key] = cca_val
+                updated = True
+                print(f"  [NEW] Merged missing CCA profile: {cca_key}")
+            else:
+                print(f"  [PRESERVED] CCA Profile: {cca_key} ({current_json['cca'][cca_key]['name']})")
 
+    if updated and not args.dry_run:
+        current_json["lastUpdated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        with open(JSON_FILE, 'w') as f:
+            json.dump(current_json, f, indent=2)
+        print("\n>>> Result: Success. JSON updated.")
+    else:
+        print("\n>>> Result: No changes committed.")
+
+    if os.path.exists(tmp_xlsx): os.remove(tmp_xlsx)
 
 if __name__ == "__main__":
     main()

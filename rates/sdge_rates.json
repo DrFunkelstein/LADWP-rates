@@ -105,6 +105,24 @@
       }
     }
   },
+  "cca": {
+    "SDCP": {
+      "name": "SD Community Power",
+      "fullName": "San Diego Community Power",
+      "tiers": {
+        "power100": { "name": "Power100 (100% Clean)", "rateAdder": 0.0150 },
+        "powerplus": { "name": "PowerPlus (50% Clean)", "rateAdder": -0.0050 }
+      }
+    },
+    "CEA": {
+      "name": "Clean Energy Alliance",
+      "fullName": "Clean Energy Alliance (North San Diego County)",
+      "tiers": {
+        "green_impact": { "name": "Green Impact (100%)", "rateAdder": 0.0150 },
+        "clean_impact": { "name": "Clean Impact (50%)", "rateAdder": -0.0050 }
+      }
+    }
+  },
   "gas": {
     "procurement": 0.45621,
     "transportation": {

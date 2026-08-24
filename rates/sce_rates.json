@@ -25,4 +25,25 @@
       "winter": { "tier1": 0.30243, "tier2": 0.40351 }
     }
   }
+  "cca": {
+    "CPA": {
+      "name": "Clean Power Alliance",
+      "fullName": "Clean Power Alliance of Southern California",
+      "pciaRate": 0.0185,
+      "tiers": {
+        "green": { "name": "100% Green Power", "rateAdder": 0.0175 },
+        "clean": { "name": "Clean Power (50%)", "rateAdder": 0.0035 },
+        "lean": { "name": "Lean Power (40%)", "rateAdder": -0.0020 }
+      }
+    },
+    "OCPA": {
+      "name": "Orange County Power",
+      "fullName": "Orange County Power Authority",
+      "pciaRate": 0.0190,
+      "tiers": {
+        "100_renewable": { "name": "100% Renewable", "rateAdder": 0.0150 },
+        "smart_choice": { "name": "Smart Choice (38%)", "rateAdder": 0.0 }
+      }
+    }
+  }
 }

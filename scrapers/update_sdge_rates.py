@@ -31,6 +31,26 @@ PLAN_MAP = {
     "EV-TOU": "EV-TOU"
 }
 
+# Verified Default CCA Profiles for SDG&E Territory (Joint Rate Comparisons)
+DEFAULT_SDGE_CCA_PROFILES = {
+    "SDCP": {
+        "name": "SD Community Power",
+        "fullName": "San Diego Community Power",
+        "tiers": {
+            "power100": {"name": "Power100 (100% Clean)", "rateAdder": 0.0150},
+            "powerplus": {"name": "PowerPlus (50% Clean)", "rateAdder": -0.0050}
+        }
+    },
+    "CEA": {
+        "name": "Clean Energy Alliance",
+        "fullName": "Clean Energy Alliance (North San Diego County)",
+        "tiers": {
+            "green_impact": {"name": "Green Impact (100%)", "rateAdder": 0.0150},
+            "clean_impact": {"name": "Clean Impact (50%)", "rateAdder": -0.0050}
+        }
+    }
+}
+
 def extract_cents(text):
     """Converts '62.1¢' to 0.62100"""
     match = re.search(r"(\d+\.\d+)", text)
@@ -48,8 +68,8 @@ def fetch_sdge_nsc_rate():
     nsc_rate = 0.01306  # Verified default
     now = datetime.now()
     current_year_str = str(now.year)
-    current_month_name = now.strftime("%B") # e.g. "August"
-    short_month_name = now.strftime("%b")   # e.g. "Aug"
+    current_month_name = now.strftime("%B")
+    short_month_name = now.strftime("%b")
     
     try:
         res = requests.get(EXCESS_GEN_URL, headers=HEADERS, timeout=15)
@@ -65,12 +85,8 @@ def fetch_sdge_nsc_rate():
                     break
             
             if target_table:
-                # 1. Map column indices from header
-                headers = [th.get_text().strip() for th in target_table.find_all(['th', 'td'])]
-                year_col_idx = 1 # Default to first data column (latest year)
-                
-                # Check if columns have year headers (e.g. 2026, 2025)
                 header_row = target_table.find('tr')
+                year_col_idx = 1
                 if header_row:
                     cols = [c.get_text().strip() for c in header_row.find_all(['th', 'td'])]
                     for idx, c in enumerate(cols):
@@ -78,14 +94,12 @@ def fetch_sdge_nsc_rate():
                             year_col_idx = idx
                             break
 
-                # 2. Find row for current month (or newest populated month)
                 rows = target_table.find_all('tr')
                 month_names = [
                     "January", "February", "March", "April", "May", "June",
                     "July", "August", "September", "October", "November", "December"
                 ]
                 
-                # Search backward from current month to find latest published rate
                 current_month_idx = now.month - 1
                 found_rate = None
                 
@@ -100,7 +114,6 @@ def fetch_sdge_nsc_rate():
                                 m_match = re.search(r"(\d+\.\d+)", val_str)
                                 if m_match:
                                     extracted = float(m_match.group(1))
-                                    # Handle whether it is in cents (1.306¢) or dollars ($0.01306)
                                     val = extracted / 100 if extracted > 0.5 else extracted
                                     if val > 0.001:
                                         found_rate = val
@@ -155,7 +168,6 @@ def main():
         data["nscRate"] = nsc_rate
         updated = True
 
-    # Ensure SBP export fields are populated
     if "sbpDeliveryExportRate" not in data or data["sbpDeliveryExportRate"] != sbp_delivery:
         data["sbpDeliveryExportRate"] = sbp_delivery
         updated = True
@@ -218,7 +230,24 @@ def main():
                         else:
                             print(f"  [MATCH]  {app_id:12} ({season}): On={new_on:.5f} | Off={new_off:.5f}")
 
-    # 3. Write updates
+    # 3. Preserve & Merge CCA Rate Blocks
+    print("\n[CCA Protection Ledger]")
+    if "cca" not in data or not data["cca"]:
+        if not dry_run:
+            data["cca"] = DEFAULT_SDGE_CCA_PROFILES
+        updated = True
+        print("  [NEW] Initialized Default SDG&E CCA Profiles (SDCP, CEA)")
+    else:
+        for cca_key, cca_val in DEFAULT_SDGE_CCA_PROFILES.items():
+            if cca_key not in data["cca"]:
+                if not dry_run:
+                    data["cca"][cca_key] = cca_val
+                updated = True
+                print(f"  [NEW] Merged missing CCA profile: {cca_key}")
+            else:
+                print(f"  [PRESERVED] CCA Profile: {cca_key} ({data['cca'][cca_key]['name']})")
+
+    # 4. Write updates
     if updated and not dry_run:
         data["lastUpdated"] = now.strftime("%Y-%m-%d %H:%M")
         with open(RATES_FILE, 'w') as f:

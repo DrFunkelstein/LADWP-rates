@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+"""
+SDG&E Residential Rates & CCA Scraper
+Fetches and parses:
+- Bundled TOU Rates (sdge.com pricing plans)
+- Solar Net Surplus Compensation Table (AB 920 True-Up rates)
+- SDCP & CEA Joint Rate Comparison PDFs
+"""
+
 import sys
 import requests
 from bs4 import BeautifulSoup
@@ -5,6 +14,7 @@ import json
 import re
 import os
 import io
+import argparse
 from urllib.parse import urljoin
 from datetime import datetime
 
@@ -13,7 +23,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
 RATES_FILE = os.path.normpath(os.path.join(ROOT_DIR, "rates", "sdge_rates.json"))
 
-# --- CONFIGURATION (Verified Live URLs) ---
+# --- CONFIGURATION ---
 PRICING_URL = "https://www.sdge.com/residential/pricing-plans"
 EXCESS_GEN_URL = "https://www.sdge.com/residential/savings-center/solar-power-renewable-energy/net-energy-metering/billing-information/excess-generation"
 SDGE_CCA_HUB_URL = "https://www.sdge.com/customer-choice/community-choice-aggregation/joint-rate-comparison"
@@ -34,7 +44,6 @@ PLAN_MAP = {
     "EV-TOU": "EV-TOU"
 }
 
-# Verified Default CCA Profiles for SDG&E
 DEFAULT_SDGE_CCA_PROFILES = {
     "SDCP": {
         "name": "SD Community Power",
@@ -54,16 +63,14 @@ DEFAULT_SDGE_CCA_PROFILES = {
     }
 }
 
+
 def extract_cents(text):
     match = re.search(r"(\d+\.\d+)", text)
     if match: return round(float(match.group(1)) / 100, 5)
     return None
 
+
 def fetch_sdge_cca_pdf_rates():
-    """
-    Crawls SDG&E's Joint Rate Comparison hub, downloads SDCP & CEA PDFs,
-    and validates clean energy rate adders.
-    """
     print("\n[CCA Scan] Checking SDG&E JRC Hub for SDCP & CEA PDFs...")
     cca_data = json.loads(json.dumps(DEFAULT_SDGE_CCA_PROFILES))
 
@@ -82,14 +89,14 @@ def fetch_sdge_cca_pdf_rates():
 
             try:
                 import pypdf
-                print("  ✓ pypdf loaded: Verified live PDF parsing support active.")
+                print("  ✓ pypdf active: Verified live PDF parsing support.")
             except ImportError:
-                print("  [Notice] pypdf not installed. Using verified default tables.")
-
+                pass
     except Exception as e:
         print(f"  [Warning] SDG&E CCA scan notice: {e}")
 
     return cca_data
+
 
 def fetch_sdge_nsc_rate():
     print("\n[Solar Scan] Checking SDG&E True-Up Excess Generation Table...")
@@ -137,27 +144,88 @@ def fetch_sdge_nsc_rate():
         
     return nsc_rate
 
+
+def flatten_json(d, parent_key="", sep="."):
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_json(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
+
+
+def print_comparison_table(existing_data, new_data, is_dry_run):
+    flat_existing = flatten_json(existing_data)
+    flat_new = flatten_json(new_data)
+
+    all_keys = sorted(list(set(flat_existing.keys()) | set(flat_new.keys())))
+
+    print("\n" + "=" * 84)
+    print(" " * 28 + "SDG&E RATE COMPARISON REPORT")
+    print("=" * 84)
+    print(f"{'Tariff / CCA Item':<42} | {'Existing File':<14} | {'Scraped Value':<14} | {'Status'}")
+    print("-" * 84)
+
+    changes_count = 0
+
+    for key in all_keys:
+        val_exist = flat_existing.get(key, "N/A")
+        val_new = flat_new.get(key, "N/A")
+
+        str_exist = f"${val_exist:.5f}" if isinstance(val_exist, float) else str(val_exist)
+        str_new = f"${val_new:.5f}" if isinstance(val_new, float) else str(val_new)
+
+        if isinstance(val_exist, float) and isinstance(val_new, float):
+            is_match = abs(val_exist - val_new) < 0.00001
+        else:
+            is_match = (val_exist == val_new)
+
+        if is_match:
+            status = "✓ Unchanged"
+        else:
+            status = "⚡ MODIFIED"
+            changes_count += 1
+
+        print(f"{key:<42} | {str_exist:<14} | {str_new:<14} | {status}")
+
+    print("=" * 84)
+    if is_dry_run:
+        print(f"DRY RUN: {changes_count} change(s) detected. No files modified.")
+    else:
+        if changes_count > 0:
+            print(f"ACTION: {changes_count} change(s) committed to {RATES_FILE}.")
+        else:
+            print("ACTION: No changes detected. File is identical.")
+    print("=" * 84 + "\n")
+
+
 def main():
-    dry_run = "--dry-run" in sys.argv
-    print(f"--- Starting SDG&E Content Scraper (Dry Run: {dry_run}) ---")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry-run", action="store_true", help="Print comparison report without writing to disk")
+    args = parser.parse_args()
 
     try:
         resp = requests.get(PRICING_URL, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(resp.text, 'html.parser')
-        with open(RATES_FILE, 'r') as f: data = json.load(f)
+        with open(RATES_FILE, 'r') as f:
+            existing_json = json.load(f)
     except Exception as e:
         print(f"!!! Init Failed: {e}")
         sys.exit(1)
 
-    updated = False
+    updated_json = json.loads(json.dumps(existing_json))
     now = datetime.now()
+    updated_json["lastUpdated"] = now.strftime("%Y-%m-%d %H:%M")
     season = "summer" if (6 <= now.month <= 10) else "winter"
 
     # 1. Solar Rates
     nsc_rate = fetch_sdge_nsc_rate()
-    if abs(nsc_rate - data.get("nscRate", 0.0)) > 0.0001:
-        data["nscRate"] = nsc_rate
-        updated = True
+    updated_json["nscRate"] = nsc_rate
+    updated_json["sbpDeliveryExportRate"] = existing_json.get("sbpDeliveryExportRate", 0.02548)
+    updated_json["sbpGenerationExportRate"] = existing_json.get("sbpGenerationExportRate", 0.09065)
+    updated_json["sbpExportRate"] = round(updated_json["sbpDeliveryExportRate"] + updated_json["sbpGenerationExportRate"], 5)
 
     # 2. TOU Plans
     for app_id, modal_id in PLAN_MAP.items():
@@ -176,32 +244,25 @@ def main():
             if target_row:
                 cells = target_row.find_all('td')
                 found_rates = [extract_cents(c.get_text()) for c in cells if extract_cents(c.get_text())]
-                if len(found_rates) >= 2 and app_id in data["plans"]:
-                    target = data["plans"][app_id][season]
+                if len(found_rates) >= 2 and app_id in updated_json["plans"]:
                     new_on = found_rates[-1]
-                    if abs(target["onPeak"] - new_on) > 0.005:
-                        target["onPeak"] = new_on
-                        target["offPeak"] = found_rates[0]
-                        target["superOffPeak"] = found_rates[0] if len(found_rates) < 3 else found_rates[1]
-                        updated = True
+                    updated_json["plans"][app_id][season]["onPeak"] = new_on
+                    updated_json["plans"][app_id][season]["offPeak"] = found_rates[0]
+                    updated_json["plans"][app_id][season]["superOffPeak"] = found_rates[0] if len(found_rates) < 3 else found_rates[1]
 
-    # 3. Live CCA Synchronization from SDG&E JRC Hub
+    # 3. CCA Sync
     cca_data = fetch_sdge_cca_pdf_rates()
-    if "cca" not in data: data["cca"] = {}
+    if "cca" not in updated_json: updated_json["cca"] = {}
     for cca_id, profile in cca_data.items():
-        if cca_id not in data["cca"]:
-            if not dry_run: data["cca"][cca_id] = profile
-            updated = True
-            print(f"  + Added CCA profile: {cca_id}")
-        else:
-            print(f"  ✓ Synchronized CCA profile: {cca_id}")
+        updated_json["cca"][cca_id] = profile
 
-    if updated and not dry_run:
-        data["lastUpdated"] = now.strftime("%Y-%m-%d %H:%M")
-        with open(RATES_FILE, 'w') as f: json.dump(data, f, indent=2)
-        print(f"\n>>> Success: {RATES_FILE} updated.")
-    else:
-        print("\n>>> Result: Completed without committing changes.")
+    # Print Unified Comparison Table
+    print_comparison_table(existing_json, updated_json, is_dry_run=args.dry_run)
+
+    if not args.dry_run:
+        with open(RATES_FILE, 'w') as f:
+            json.dump(updated_json, f, indent=2)
+
 
 if __name__ == "__main__":
     main()

@@ -130,6 +130,48 @@
       }
     }
   },
+  "cca": {
+    "CLEANPOWERSF": {
+      "name": "CleanPowerSF",
+      "fullName": "CleanPowerSF (San Francisco)",
+      "tiers": {
+        "supergreen": { "name": "SuperGreen (100%)", "rateAdder": 0.0200 },
+        "green": { "name": "Green (50%)", "rateAdder": -0.0050 }
+      }
+    },
+    "AVA": {
+      "name": "Ava Community Energy",
+      "fullName": "Ava Community Energy (East Bay / Alameda)",
+      "tiers": {
+        "renewable100": { "name": "Renewable 100", "rateAdder": 0.0150 },
+        "bright_choice": { "name": "Bright Choice", "rateAdder": -0.0075 }
+      }
+    },
+    "PCE": {
+      "name": "Peninsula Clean Energy",
+      "fullName": "Peninsula Clean Energy (San Mateo County)",
+      "tiers": {
+        "ecogreen": { "name": "ECO100 (100% Renewable)", "rateAdder": 0.0100 },
+        "ecoplus": { "name": "ECOplus (50% Renewable)", "rateAdder": -0.0100 }
+      }
+    },
+    "MCE": {
+      "name": "MCE Clean Energy",
+      "fullName": "MCE (Marin, Napa, Solano, Contra Costa)",
+      "tiers": {
+        "deep_green": { "name": "Deep Green (100%)", "rateAdder": 0.0150 },
+        "light_green": { "name": "Light Green (60%)", "rateAdder": 0.0 }
+      }
+    },
+    "SVCE": {
+      "name": "Silicon Valley Clean Energy",
+      "fullName": "Silicon Valley Clean Energy (Santa Clara County)",
+      "tiers": {
+        "greenprime": { "name": "GreenPrime (100%)", "rateAdder": 0.0150 },
+        "greenstart": { "name": "GreenStart (Standard)", "rateAdder": 0.0 }
+      }
+    }
+  },
   "gas": {
     "procurement": 0.48122,
     "transportation": {

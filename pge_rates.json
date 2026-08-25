@@ -4,7 +4,7 @@
   "baselineCredit": 0.0814,
   "sbpExportRate": 0.075,
   "nscRate": 0.032,
-    "fixed": {
+  "fixed": {
     "baseServiceStandard": 0.80500,
     "baseServiceFERA": 0.40000,
     "baseServiceCARE": 0.20000,
@@ -127,6 +127,102 @@
         "onPeak": 0.43877999999999995,
         "offPeak": 0.30677,
         "superOffPeak": 0.23503999999999997
+      }
+    }
+  },
+  "cca": {
+    "SJCE": {
+      "name": "San Jose Clean Energy",
+      "fullName": "San Jose Clean Energy (City of San Jose)",
+      "tiers": {
+        "totalgreen": { "name": "TotalGreen (100% Renewable)", "rateAdder": 0.0180 },
+        "greensource": { "name": "GreenSource (62% Clean)", "rateAdder": -0.0050 }
+      }
+    },
+    "3CE_PGE": {
+      "name": "Central Coast Energy",
+      "fullName": "Central Coast Community Energy",
+      "tiers": {
+        "3c_prime": { "name": "3Cprime (100% Clean)", "rateAdder": 0.0150 },
+        "3c_choice": { "name": "3Cchoice (Standard)", "rateAdder": -0.0050 }
+      }
+    },
+    "SCP": {
+      "name": "Sonoma Clean Power",
+      "fullName": "Sonoma Clean Power (Sonoma & Mendocino)",
+      "tiers": {
+        "evergreen": { "name": "Evergreen (100% Local)", "rateAdder": 0.0250 },
+        "cleanstart": { "name": "CleanStart (Default)", "rateAdder": -0.0050 }
+      }
+    },
+    "CLEANPOWERSF": {
+      "name": "CleanPowerSF",
+      "fullName": "CleanPowerSF (San Francisco)",
+      "tiers": {
+        "supergreen": { "name": "SuperGreen (100%)", "rateAdder": 0.0200 },
+        "green": { "name": "Green (50%)", "rateAdder": -0.0050 }
+      }
+    },
+    "AVA": {
+      "name": "Ava Community Energy",
+      "fullName": "Ava Community Energy (East Bay / Alameda)",
+      "tiers": {
+        "renewable100": { "name": "Renewable 100", "rateAdder": 0.0150 },
+        "bright_choice": { "name": "Bright Choice", "rateAdder": -0.0075 }
+      }
+    },
+    "PCE": {
+      "name": "Peninsula Clean Energy",
+      "fullName": "Peninsula Clean Energy (San Mateo County)",
+      "tiers": {
+        "ecogreen": { "name": "ECO100 (100% Renewable)", "rateAdder": 0.0100 },
+        "ecoplus": { "name": "ECOplus (50% Renewable)", "rateAdder": -0.0100 }
+      }
+    },
+    "MCE": {
+      "name": "MCE Clean Energy",
+      "fullName": "MCE (Marin, Napa, Solano, Contra Costa)",
+      "tiers": {
+        "deep_green": { "name": "Deep Green (100%)", "rateAdder": 0.0150 },
+        "light_green": { "name": "Light Green (60%)", "rateAdder": 0.0 }
+      }
+    },
+    "SVCE": {
+      "name": "Silicon Valley Clean Energy",
+      "fullName": "Silicon Valley Clean Energy (Santa Clara County)",
+      "tiers": {
+        "greenprime": { "name": "GreenPrime (100%)", "rateAdder": 0.0150 },
+        "greenstart": { "name": "GreenStart (Standard)", "rateAdder": 0.0 }
+      }
+    },
+    "PIONEER": {
+      "name": "Pioneer Community Energy",
+      "fullName": "Pioneer Community Energy (Placer & El Dorado Counties)",
+      "pciaRate": 0.00714,
+      "tiers": {
+        "green100": { "name": "100% Renewable", "rateAdder": 0.0150 },
+        "standard": { "name": "Standard Choice", "rateAdder": -0.0050 },
+        "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0000 }
+      }
+    },
+    "VCE": {
+      "name": "Valley Clean Energy",
+      "fullName": "Valley Clean Energy (Yolo County)",
+      "pciaRate": 0.00714,
+      "tiers": {
+        "ultragreen": { "name": "UltraGreen (100% Clean)", "rateAdder": 0.0150 },
+        "standardgreen": { "name": "Standard Green", "rateAdder": -0.0050 },
+        "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0000 }
+      }
+    },
+    "RCEA": {
+      "name": "Redwood Coast Energy",
+      "fullName": "Redwood Coast Energy Authority (Humboldt County)",
+      "pciaRate": 0.00714,
+      "tiers": {
+        "repower_plus": { "name": "REpower+ (100% Renewable)", "rateAdder": 0.0100 },
+        "repower": { "name": "REpower (Standard)", "rateAdder": -0.0050 },
+        "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0000 }
       }
     }
   },

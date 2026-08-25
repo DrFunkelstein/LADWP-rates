@@ -98,6 +98,24 @@ DEFAULT_PGE_CCA_PROFILES = {
             "greenprime": {"name": "GreenPrime (100%)", "rateAdder": 0.0150},
             "greenstart": {"name": "GreenStart (Standard)", "rateAdder": 0.0000}
         }
+    },
+    "PIONEER": {
+        "name": "Pioneer Community Energy",
+        "fullName": "Pioneer Community Energy (Placer & El Dorado Counties)",
+        "default_tiers": {"green100": 0.0150, "standard": -0.0050, "optOut": 0.0},
+        "jrc_url": "https://pioneercommunityenergy.org/rates/"
+    },
+    "VCE": {
+        "name": "Valley Clean Energy",
+        "fullName": "Valley Clean Energy (Yolo County)",
+        "default_tiers": {"ultragreen": 0.0150, "standardgreen": -0.0050, "optOut": 0.0},
+        "jrc_url": "https://valleycleanenergy.org/rates/"
+    },
+    "RCEA": {
+        "name": "Redwood Coast Energy",
+        "fullName": "Redwood Coast Energy Authority (Humboldt County)",
+        "default_tiers": {"repower_plus": 0.0100, "repower": -0.0050, "optOut": 0.0},
+        "jrc_url": "https://redwoodenergy.org/residential-rates/"
     }
 }
 

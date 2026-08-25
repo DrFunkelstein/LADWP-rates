@@ -194,6 +194,36 @@
         "greenprime": { "name": "GreenPrime (100%)", "rateAdder": 0.0150 },
         "greenstart": { "name": "GreenStart (Standard)", "rateAdder": 0.0 }
       }
+    },
+    "PIONEER": {
+      "name": "Pioneer Community Energy",
+      "fullName": "Pioneer Community Energy (Placer & El Dorado Counties)",
+      "pciaRate": 0.00714,
+      "tiers": {
+        "green100": { "name": "100% Renewable", "rateAdder": 0.0150 },
+        "standard": { "name": "Standard Choice", "rateAdder": -0.0050 },
+        "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0000 }
+      }
+    },
+    "VCE": {
+      "name": "Valley Clean Energy",
+      "fullName": "Valley Clean Energy (Yolo County)",
+      "pciaRate": 0.00714,
+      "tiers": {
+        "ultragreen": { "name": "UltraGreen (100% Clean)", "rateAdder": 0.0150 },
+        "standardgreen": { "name": "Standard Green", "rateAdder": -0.0050 },
+        "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0000 }
+      }
+    },
+    "RCEA": {
+      "name": "Redwood Coast Energy",
+      "fullName": "Redwood Coast Energy Authority (Humboldt County)",
+      "pciaRate": 0.00714,
+      "tiers": {
+        "repower_plus": { "name": "REpower+ (100% Renewable)", "rateAdder": 0.0100 },
+        "repower": { "name": "REpower (Standard)", "rateAdder": -0.0050 },
+        "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0000 }
+      }
     }
   },
   "gas": {

@@ -1,9 +1,9 @@
 {
-  "lastUpdated": "2026-08-02 12:52",
+  "lastUpdated": "2026-08-31 18:06",
   "procurement": 0.16863,
   "transportation": {
-    "base": 1.11939,
-    "over": 1.6127
+    "base": 1.027,
+    "over": 1.50652
   },
   "fixed": {
     "customerCharge": 0.16438,

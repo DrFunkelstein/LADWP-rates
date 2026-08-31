@@ -2,9 +2,14 @@ name: SoCalGas Auto Update
 
 on:
   schedule:
-    # Runs at 12:00 PM (Noon) UTC on the 1st, 2nd, and 3rd of every month
     - cron: '0 12 2 * *'
-  workflow_dispatch: # Allows you to trigger it manually for testing
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry Run Mode'
+        type: boolean
+        required: false
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -26,10 +31,17 @@ jobs:
         run: pip install requests beautifulsoup4 pdfplumber
 
       - name: Run Scraper
-        # This will turn RED and email you if it finds 0 rates (Structural Failure)
-        run: python scrapers/update_gas.py
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo ">>> Running in DRY RUN mode..."
+            python scrapers/update_gas.py --dry-run
+          else
+            echo ">>> Running in LIVE mode..."
+            python scrapers/update_gas.py
+          fi
 
       - name: Commit and Push Changes
+        if: ${{ inputs.dry_run != true }}
         run: |
           git config --global user.name 'GasBot'
           git config --global user.email 'bot@utilityestimator.com'

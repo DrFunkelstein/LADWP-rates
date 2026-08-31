@@ -22,6 +22,27 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
 }
 
+def scrape_procurement_rate(html_text):
+    now = datetime.now()
+    month_name = now.strftime("%B") # e.g. "August"
+    year = now.strftime("%Y")       # e.g. "2026"
+    
+    # Strategy A: Match the official summary sentence:
+    # "Effective August 1, 2026, the procurement component ... to 41.856 ¢/therm"
+    sentence_pattern = rf"Effective\s+{month_name}\s+\d{{1,2}},?\s+{year}[^\n\r]*?to\s+(\d+\.\d{{3,5}})\s*¢/therm"
+    match = re.search(sentence_pattern, html_text, re.IGNORECASE)
+    if match:
+        return round(float(match.group(1)) / 100, 5)
+
+    # Strategy B: Match the HTML table row:
+    # "August 1, 2026" in table followed by cents/therm value
+    table_pattern = rf"{month_name}\s+\d{{1,2}},?\s+{year}[\s\S]*?(\d+\.\d{{3,5}})"
+    match = re.search(table_pattern, html_text, re.IGNORECASE)
+    if match:
+        return round(float(match.group(1)) / 100, 5)
+
+    return None
+
 def scrape_pdf_fees():
     print("[*] Downloading and parsing Tariff PDF...")
     try:
@@ -34,7 +55,6 @@ def scrape_pdf_fees():
 
                 # 1. Schedule No. GR (Transportation & Customer Charge)
                 if "Schedule No. GR" in text and "RESIDENTIAL SERVICE" in text:
-                    print("  [+] Found Schedule GR Page")
                     c_charge = re.search(r"Customer Charge.*?(\d+\.\d+)¢", text)
                     t1_trans = re.search(r"Baseline.*?Transmission Charge.*?(\d+\.\d+)¢", text, re.DOTALL)
                     t2_trans = re.search(r"Non-Baseline.*?Transmission Charge.*?(\d+\.\d+)¢", text, re.DOTALL)
@@ -48,7 +68,6 @@ def scrape_pdf_fees():
                     ppps_match = re.search(r"Residential\s+[\d\.]+\s+(\d+\.\d+)", text)
                     if ppps_match:
                         fees['ppps'] = round(float(ppps_match.group(1)) / 100, 5)
-                        print(f"  [+] Found PPPS: {fees['ppps']}")
 
             return fees
     except Exception as e:
@@ -66,17 +85,15 @@ def main():
 
         # --- 1. PROCUREMENT (Monthly HTML) ---
         resp = requests.get(PROCUREMENT_URL, headers=HEADERS, timeout=15)
-        html_text = resp.text
-        month_year = datetime.now().strftime("%B %Y")
-        proc_match = re.search(rf"{month_year}.*?(\d+\.\d{{3,5}})", html_text, re.DOTALL)
+        new_proc = scrape_procurement_rate(resp.text)
         
-        if proc_match:
-            data["procurement"] = round(float(proc_match.group(1)) / 100, 5)
-            print(f"  [+] Updated Procurement ({month_year}): ${data['procurement']:.5f}/therm")
+        if new_proc:
+            data["procurement"] = new_proc
+            print(f"  [+] Updated Procurement: ${data['procurement']:.5f}/therm")
         else:
-            print(f"  [!] No Procurement match found for {month_year}.")
+            print(f"  [!] Warning: Could not scrape current procurement rate.")
 
-        # --- 2. FEES (Yearly PDF) ---
+        # --- 2. FEES (Tariff PDF) ---
         new_fees = scrape_pdf_fees()
         if new_fees:
             if 't1' in new_fees: data["transportation"]["base"] = new_fees['t1']
@@ -86,7 +103,7 @@ def main():
             print("  [+] Successfully updated fees from PDF.")
 
         # --- 3. SAFETY CHECK ---
-        if not proc_match and not new_fees:
+        if not new_proc and not new_fees:
             print("!!! SUBSTANTIAL FAILURE: HTML and PDF both failed.")
             sys.exit(1)
 
@@ -95,12 +112,10 @@ def main():
         if not dry_run:
             with open(OUTPUT_FILE, 'w') as f:
                 json.dump(data, f, indent=2)
-            print(f"\n>>> Success: {OUTPUT_FILE} updated.")
+            print(f"\n>>> Success: {OUTPUT_FILE} updated to ${data.get('procurement', 0):.5f}/therm.")
         else:
             print(f"\n>>> [DRY RUN] Would write updates to {OUTPUT_FILE}:")
             print(f"    Procurement: ${data.get('procurement', 0):.5f}")
-            print(f"    T1 Delivery: ${data['transportation'].get('base', 0):.5f}")
-            print(f"    T2 Delivery: ${data['transportation'].get('over', 0):.5f}")
 
         sys.exit(0)
 

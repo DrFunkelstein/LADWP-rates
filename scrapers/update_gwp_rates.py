@@ -2,6 +2,7 @@
 """
 Glendale Water & Power (GWP) Rate Scraper
 Fetches current residential electric rates from GWP's official website.
+Outputs to rates/gwp_rates.json matching MeterWise GWPRatesJSON schema.
 """
 
 import argparse
@@ -14,9 +15,28 @@ import requests
 from bs4 import BeautifulSoup
 
 URL = "https://www.glendaleca.gov/government/departments/glendale-water-and-power/rates/residential-electric-rates"
+
+# --- ROBUST PATH RESOLUTION ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
-OUTPUT_FILE = os.path.normpath(os.path.join(ROOT_DIR, "rates", "gwp_rates.json"))
+if os.path.basename(SCRIPT_DIR) == "scripts":
+    ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+else:
+    ROOT_DIR = SCRIPT_DIR
+
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+CANDIDATE_PATHS = [
+    os.path.join(ROOT_DIR, "rates", "gwp_rates.json"),
+    os.path.join(ROOT_DIR, "gwp_rates.json"),
+    os.path.join(SCRIPT_DIR, "gwp_rates.json")
+]
+
+OUTPUT_FILE = CANDIDATE_PATHS[0]
+for p in CANDIDATE_PATHS:
+    if os.path.exists(p):
+        OUTPUT_FILE = p
+        break
 
 
 def parse_args():
@@ -31,41 +51,68 @@ def fetch_html(verbose: bool) -> str:
         print(f"[*] Fetching HTML from: {URL}")
     
     session = requests.Session()
+    # Comprehensive anti-blocking header set for municipal CMS / Cloudflare / Granicus
     headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9"
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Sec-Ch-Ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"macOS"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1"
     }
-    response = session.get(URL, headers=headers, timeout=20)
+    
+    response = session.get(URL, headers=headers, timeout=25)
     response.raise_for_status()
     return response.text
 
 
 def parse_gwp_rates(html: str, verbose: bool) -> dict:
     soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text()
+    text = soup.get_text(separator=" ")
 
-    # Parse Customer Charge
-    cust_match = re.search(r"Customer Charge - per meter per day\s+\$([\d\.]+)", text)
+    # 1. Customer Charge ($0.75/day)
+    cust_match = re.search(r"Customer\s+Charge\s*-\s*per\s+meter\s+per\s+day\s+\$([\d\.]+)", text, re.IGNORECASE)
     cust_charge = float(cust_match.group(1)) if cust_match else 0.75
 
-    # High Season Standard
-    h_t1 = re.search(r"July through October.*?First 10kWh.*?\$([\d\.]+)", text, re.DOTALL)
-    h_t2 = re.search(r"July through October.*?Next 10kWh.*?\$([\d\.]+)", text, re.DOTALL)
-    h_t3 = re.search(r"July through October.*?Remaining kWh.*?\$([\d\.]+)", text, re.DOTALL)
+    # 2. Standard L-1-A High Season (July through October)
+    h_t1 = re.search(r"July\s+through\s+October[^\$]+?First\s+10\s*kWh[^\$]+?\$([\d\.]+)", text, re.IGNORECASE)
+    h_t2 = re.search(r"July\s+through\s+October[^\$]+?Next\s+10\s*kWh[^\$]+?\$([\d\.]+)", text, re.IGNORECASE)
+    h_t3 = re.search(r"July\s+through\s+October[^\$]+?Remaining\s+kWh[^\$]+?\$([\d\.]+)", text, re.IGNORECASE)
 
-    # Low Season Standard
-    l_t1 = re.search(r"November through June.*?First 10kWh.*?\$([\d\.]+)", text, re.DOTALL)
-    l_t2 = re.search(r"November through June.*?Next 10kWh.*?\$([\d\.]+)", text, re.DOTALL)
-    l_t3 = re.search(r"November through June.*?Remaining kWh.*?\$([\d\.]+)", text, re.DOTALL)
+    # 3. Standard L-1-A Low Season (November through June)
+    l_t1 = re.search(r"November\s+through\s+June[^\$]+?First\s+10\s*kWh[^\$]+?\$([\d\.]+)", text, re.IGNORECASE)
+    l_t2 = re.search(r"November\s+through\s+June[^\$]+?Next\s+10\s*kWh[^\$]+?\$([\d\.]+)", text, re.IGNORECASE)
+    l_t3 = re.search(r"November\s+through\s+June[^\$]+?Remaining\s+kWh[^\$]+?\$([\d\.]+)", text, re.IGNORECASE)
 
-    # High Season TOU
-    h_tou_base = re.search(r"L-1-B.*?July through October.*?Base Period.*?\*.*?\$([\d\.]+)", text, re.DOTALL)
-    h_tou_peak = re.search(r"L-1-B.*?July through October.*?Peak Period.*?\*\*.*?\$([\d\.]+)", text, re.DOTALL)
+    # 4. TOU L-1-B High Season
+    h_tou_base = re.search(r"L-1-B[\s\S]*?July\s+through\s+October[\s\S]*?Base\s+Period[^\$]+?\$([\d\.]+)", text, re.IGNORECASE)
+    h_tou_peak = re.search(r"L-1-B[\s\S]*?July\s+through\s+October[\s\S]*?Peak\s+Period[^\$]+?\$([\d\.]+)", text, re.IGNORECASE)
 
-    # Low Season TOU
-    l_tou_base = re.search(r"L-1-B.*?November through June.*?Base Period.*?\*.*?\$([\d\.]+)", text, re.DOTALL)
-    l_tou_peak = re.search(r"L-1-B.*?November through June.*?Peak Period.*?\*\*\*.*?\$([\d\.]+)", text, re.DOTALL)
+    # 5. TOU L-1-B Low Season
+    l_tou_base = re.search(r"L-1-B[\s\S]*?November\s+through\s+June[\s\S]*?Base\s+Period[^\$]+?\$([\d\.]+)", text, re.IGNORECASE)
+    l_tou_peak = re.search(r"L-1-B[\s\S]*?November\s+through\s+June[\s\S]*?Peak\s+Period[^\$]+?\$([\d\.]+)", text, re.IGNORECASE)
+
+    # Read existing JSON to preserve water structure if present
+    existing_water = {
+        "dailyCustomerCharge": 0.881,
+        "limits": { "tier1": 8.0, "tier2": 15.0 },
+        "rates": { "tier1": 2.80, "tier2": 4.11, "tier3": 4.28 }
+    }
+    
+    if os.path.exists(OUTPUT_FILE):
+        try:
+            with open(OUTPUT_FILE, 'r') as f:
+                old_data = json.load(f)
+                if "water" in old_data:
+                    existing_water = old_data["water"]
+        except Exception:
+            pass
 
     data = {
         "lastUpdated": datetime.now().strftime("%Y-%m-%d"),
@@ -99,18 +146,7 @@ def parse_gwp_rates(html: str, verbose: bool) -> dict:
                 }
             }
         },
-        "water": {
-            "dailyCustomerCharge": 0.881,
-            "limits": {
-                "tier1": 8.0,
-                "tier2": 15.0
-            },
-            "rates": {
-                "tier1": 2.80,
-                "tier2": 4.11,
-                "tier3": 4.28
-            }
-        }
+        "water": existing_water
     }
     return data
 
@@ -124,7 +160,8 @@ def main():
         print("\n" + "=" * 55)
         print("          GWP RATE SCRAPER REPORT")
         print("=" * 55)
-        print(f"Customer Charge: ${data['electric']['dailyCustomerCharge']:.2f}/day")
+        print(f"Target Output File:    {OUTPUT_FILE}")
+        print(f"Customer Charge:       ${data['electric']['dailyCustomerCharge']:.2f}/day")
         print(f"High Season (Jul-Oct): T1=${data['electric']['standard']['highSeason']['tier1']:.4f}, T2=${data['electric']['standard']['highSeason']['tier2']:.4f}, T3=${data['electric']['standard']['highSeason']['tier3']:.4f}")
         print(f"Low Season (Nov-Jun):  T1=${data['electric']['standard']['lowSeason']['tier1']:.4f}, T2=${data['electric']['standard']['lowSeason']['tier2']:.4f}, T3=${data['electric']['standard']['lowSeason']['tier3']:.4f}")
         print(f"TOU Peak High/Low:     ${data['electric']['tou']['highSeason']['peak']:.4f} / ${data['electric']['tou']['lowSeason']['peak']:.4f}")
@@ -133,6 +170,7 @@ def main():
         if args.dry_run:
             print("[DRY RUN COMPLETE] File was not modified.")
         else:
+            os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
             with open(OUTPUT_FILE, "w") as f:
                 json.dump(data, f, indent=2)
             print(f"[SUCCESS] Updated {OUTPUT_FILE} successfully.")

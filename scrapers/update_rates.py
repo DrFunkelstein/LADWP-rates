@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-LADWP Rate Scraper
-Fetches current residential electric and water rate tables from LADWP.com.
-Outputs to rates/ladwp_rates.json matching MeterWise LADWPRatesJSON schema.
+LADWP Rate Scraper & Verification Engine
+Fetches residential electric and water rate tables from LADWP.com.
+Outputs a structured change comparison table to verify reasonableness.
 """
 
 import sys
@@ -15,7 +15,6 @@ from datetime import datetime
 
 # --- ROBUST PATH RESOLUTION ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# Check root directory whether script is in root or scripts/ folder
 if os.path.basename(SCRIPT_DIR) == "scripts":
     ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
 else:
@@ -24,7 +23,6 @@ else:
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-# Locate JSON target file
 CANDIDATE_PATHS = [
     os.path.join(ROOT_DIR, "rates", "ladwp_rates.json"),
     os.path.join(ROOT_DIR, "ladwp_rates.json"),
@@ -64,6 +62,25 @@ HEADERS = {
     'Sec-Fetch-Mode': 'navigate',
     'Sec-Fetch-Site': 'none'
 }
+
+
+class RateChangeRecord:
+    def __init__(self, plan_name: str, period: str, tier_name: str, old_rate: float, new_rate: float):
+        self.plan_name = plan_name
+        self.period = period
+        self.tier_name = tier_name
+        self.old_rate = old_rate
+        self.new_rate = new_rate
+        self.delta = new_rate - old_rate
+        self.pct_change = (self.delta / old_rate * 100) if old_rate > 0 else 0.0
+
+    @property
+    def status(self) -> str:
+        if abs(self.delta) < 0.00001:
+            return "UNCHANGED"
+        if abs(self.pct_change) <= 25.0:
+            return "REASONABLE"
+        return "WARN: LARGE SHIFT"
 
 
 def extract_rates(row, expected_count):
@@ -107,7 +124,6 @@ def scrape_section(soup, occurrence, search_text, year_target, pattern_map, is_w
                                 if len(nums) >= 3:
                                     for key in json_keys:
                                         results[key] = nums
-                                    print(f"  [Found] {year_target} {pattern} -> {json_keys}: {nums}")
                 break
     return results
 
@@ -118,7 +134,6 @@ def scrape_base_rates(soup):
     for table in soup.find_all('table'):
         table_text = table.get_text().lower()
         if "energy charge" in table_text and "base rate" in table_text:
-            print("Scraping LADWP R-1A Base Rates Table...")
             for row in table.find_all('tr'):
                 row_text = row.get_text(separator=' ', strip=True)
                 for pattern, json_keys in E_PERIOD_MAP.items():
@@ -127,7 +142,6 @@ def scrape_base_rates(soup):
                         if len(nums) >= 3:
                             for key in json_keys:
                                 results[key] = nums
-                            print(f"  [Found Base Rate] {pattern} -> {json_keys}: {nums}")
             break
     return results
 
@@ -141,7 +155,6 @@ def load_existing_json():
         except Exception as e:
             print(f"[WARN] Failed to parse existing JSON: {e}")
             
-    # Fallback schema matching LADWPRatesJSON.swift
     return {
         "version": 1,
         "utility": "LADWP",
@@ -153,23 +166,47 @@ def load_existing_json():
             "julSep": [7, 8, 9],
             "octDec": [10, 11, 12]
         },
-        "electric": {
-            "standard": {},
-            "tou": {}
-        },
+        "electric": { "standard": {}, "tou": {} },
         "water": {},
         "trash": { "flatRate": 72.80 }
     }
 
 
+def print_comparison_report(records: list[RateChangeRecord], dry_run: bool):
+    """Renders a clean, formatted ASCII rate verification report."""
+    print("\n" + "=" * 94)
+    print("                           LADWP RATE CHANGE VERIFICATION AUDIT")
+    print("=" * 94)
+    print(f"{'Plan & Period':<26} | {'Tier / Line':<12} | {'Old Rate':<10} | {'New Rate':<10} | {'Delta ($)':<10} | {'Shift %':<8} | {'Status'}")
+    print("-" * 94)
+
+    updated_count = 0
+    warning_count = 0
+
+    for r in records:
+        delta_str = f"{r.delta:+.5f}" if abs(r.delta) >= 0.00001 else "$0.00000"
+        pct_str = f"{r.pct_change:+.2f}%" if abs(r.delta) >= 0.00001 else "0.00%"
+        
+        status_tag = f"[{r.status}]"
+        if r.status == "REASONABLE":
+            updated_count += 1
+        elif r.status == "WARN: LARGE SHIFT":
+            updated_count += 1
+            warning_count += 1
+
+        label = f"{r.plan_name} ({r.period})"
+        print(f"{label:<26} | {r.tier_name:<12} | ${r.old_rate:<9.5f} | ${r.new_rate:<9.5f} | {delta_str:<10} | {pct_str:<8} | {status_tag}")
+
+    print("=" * 94)
+    mode_text = "[DRY RUN: NO FILES MODIFIED]" if dry_run else "[COMMITTED TO DISK]"
+    print(f"Summary: {len(records)} Total Audited | {updated_count} Changed | {warning_count} Warnings | {mode_text}\n")
+
+
 def main():
     dry_run = "--dry-run" in sys.argv
-    if dry_run:
-        print("!!! DRY RUN MODE ACTIVE: No changes will be saved !!!\n")
-
     data = load_existing_json()
     current_year = datetime.now().year
-    print(f"Scraping LADWP for year {current_year} (Target file: {OUTPUT_FILE})...")
+    print(f"[*] Starting LADWP rate scrape for {current_year} (Target: {OUTPUT_FILE})...")
 
     session = requests.Session()
     session.headers.update(HEADERS)
@@ -183,84 +220,99 @@ def main():
         print(f"[ERROR] Could not fetch LADWP electric page: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # 2. Scrape R-1A Standard and Base Rates
-    r1a_site_data = scrape_section(e_soup, 1, "Total Consumption Charge", current_year, E_PERIOD_MAP)
-    if not r1a_site_data:
-        # Fallback to previous year anchor if new calendar year has not posted tables yet
-        r1a_site_data = scrape_section(e_soup, 1, "Total Consumption Charge", current_year - 1, E_PERIOD_MAP)
-
+    r1a_site_data = scrape_section(e_soup, 1, "Total Consumption Charge", current_year, E_PERIOD_MAP) or \
+                    scrape_section(e_soup, 1, "Total Consumption Charge", current_year - 1, E_PERIOD_MAP)
     r1a_base_site_data = scrape_base_rates(e_soup)
 
-    # 3. Scrape R-1B TOU
-    r1b_site_data = scrape_section(e_soup, 2, "Total Consumption Charge", current_year, E_PERIOD_MAP)
-    if not r1b_site_data:
-        r1b_site_data = scrape_section(e_soup, 2, "Total Consumption Charge", current_year - 1, E_PERIOD_MAP)
+    r1b_site_data = scrape_section(e_soup, 2, "Total Consumption Charge", current_year, E_PERIOD_MAP) or \
+                    scrape_section(e_soup, 2, "Total Consumption Charge", current_year - 1, E_PERIOD_MAP)
 
-    # 4. Fetch and Scrape Water Page
+    # 2. Fetch Water Page
     try:
         w_resp = session.get(WATER_URL, timeout=20)
         w_resp.raise_for_status()
         w_soup = BeautifulSoup(w_resp.text, 'html.parser')
-        water_site_data = scrape_section(w_soup, 1, "Total Consumption Charge", current_year, W_PERIOD_MAP, is_water=True)
-        if not water_site_data:
-            water_site_data = scrape_section(w_soup, 1, "Total Consumption Charge", current_year - 1, W_PERIOD_MAP, is_water=True)
+        water_site_data = scrape_section(w_soup, 1, "Total Consumption Charge", current_year, W_PERIOD_MAP, is_water=True) or \
+                          scrape_section(w_soup, 1, "Total Consumption Charge", current_year - 1, W_PERIOD_MAP, is_water=True)
     except Exception as e:
-        print(f"[WARN] Water rate fetch failed, preserving existing water data: {e}")
+        print(f"[WARN] Water rate fetch failed: {e}")
         water_site_data = {}
 
-    updated = False
+    change_records: list[RateChangeRecord] = []
+    has_updates = False
 
-    # Apply Electric R-1A
-    for key, rates in r1a_site_data.items():
-        existing = data["electric"]["standard"].get(key, {})
-        base_rates = r1a_base_site_data.get(key, [
+    # Audit R-1A (Standard)
+    for period_key, rates in r1a_site_data.items():
+        existing = data["electric"]["standard"].get(period_key, {})
+        base_rates = r1a_base_site_data.get(period_key, [
             existing.get("baseTier1", 0.07142),
             existing.get("baseTier2", 0.13001),
             existing.get("baseTier3", 0.13001)
         ])
-        
+
+        old_t1 = existing.get("tier1", rates[0])
+        old_t2 = existing.get("tier2", rates[1])
+        old_t3 = existing.get("tier3", rates[2])
+
+        change_records.append(RateChangeRecord("R-1A Standard", period_key, "Tier 1", old_t1, rates[0]))
+        change_records.append(RateChangeRecord("R-1A Standard", period_key, "Tier 2", old_t2, rates[1]))
+        change_records.append(RateChangeRecord("R-1A Standard", period_key, "Tier 3", old_t3, rates[2]))
+
         new_val = {
-            "tier1": rates[0], 
-            "tier2": rates[1], 
-            "tier3": rates[2],
-            "baseTier1": base_rates[0],
-            "baseTier2": base_rates[1],
-            "baseTier3": base_rates[2]
+            "tier1": rates[0], "tier2": rates[1], "tier3": rates[2],
+            "baseTier1": base_rates[0], "baseTier2": base_rates[1], "baseTier3": base_rates[2]
         }
-        if data["electric"]["standard"].get(key) != new_val:
-            print(f"  [UPDATE] Electric R-1A {key} -> {new_val}")
-            data["electric"]["standard"][key] = new_val
-            updated = True
+        if data["electric"]["standard"].get(period_key) != new_val:
+            data["electric"]["standard"][period_key] = new_val
+            has_updates = True
 
-    # Apply Electric R-1B
-    for key, rates in r1b_site_data.items():
+    # Audit R-1B (TOU)
+    for period_key, rates in r1b_site_data.items():
+        existing = data["electric"]["tou"].get(period_key, {})
+        old_t1 = existing.get("tier1", rates[0])
+        old_t2 = existing.get("tier2", rates[1])
+        old_t3 = existing.get("tier3", rates[2])
+
+        change_records.append(RateChangeRecord("R-1B TOU", period_key, "High Peak", old_t1, rates[0]))
+        change_records.append(RateChangeRecord("R-1B TOU", period_key, "Low Peak", old_t2, rates[1]))
+        change_records.append(RateChangeRecord("R-1B TOU", period_key, "Base", old_t3, rates[2]))
+
         new_val = {"tier1": rates[0], "tier2": rates[1], "tier3": rates[2]}
-        if data["electric"]["tou"].get(key) != new_val:
-            print(f"  [UPDATE] Electric R-1B {key} -> {new_val}")
-            data["electric"]["tou"][key] = new_val
-            updated = True
+        if data["electric"]["tou"].get(period_key) != new_val:
+            data["electric"]["tou"][period_key] = new_val
+            has_updates = True
 
-    # Apply Water
-    for key, rates in water_site_data.items():
+    # Audit Water (Tier 1 - 4)
+    for period_key, rates in water_site_data.items():
         if len(rates) >= 4:
-            new_val = {"tier1": rates[0], "tier2": rates[1], "tier3": rates[2], "tier4": rates[3]}
-            if data["water"].get(key) != new_val:
-                print(f"  [UPDATE] Water {key} -> {new_val}")
-                data["water"][key] = new_val
-                updated = True
+            existing = data["water"].get(period_key, {})
+            old_t1 = existing.get("tier1", rates[0])
+            old_t2 = existing.get("tier2", rates[1])
+            old_t3 = existing.get("tier3", rates[2])
+            old_t4 = existing.get("tier4", rates[3])
 
-    if updated:
-        if dry_run:
-            print("\n>>> FINISH: Changes detected but not saved (Dry Run).")
-        else:
-            data["lastUpdated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-            data["version"] = data.get("version", 1) + 1
-            os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-            with open(OUTPUT_FILE, 'w') as f:
-                json.dump(data, f, indent=2)
-            print(f"\n>>> FINISH: Success! Updated {OUTPUT_FILE}")
-    else:
-        print("\n>>> FINISH: No new rate changes detected. JSON is up to date.")
+            change_records.append(RateChangeRecord("Water", period_key, "Tier 1", old_t1, rates[0]))
+            change_records.append(RateChangeRecord("Water", period_key, "Tier 2", old_t2, rates[1]))
+            change_records.append(RateChangeRecord("Water", period_key, "Tier 3", old_t3, rates[2]))
+            change_records.append(RateChangeRecord("Water", period_key, "Tier 4", old_t4, rates[3]))
+
+            new_val = {"tier1": rates[0], "tier2": rates[1], "tier3": rates[2], "tier4": rates[3]}
+            if data["water"].get(period_key) != new_val:
+                data["water"][period_key] = new_val
+                has_updates = True
+
+    # Print Full Audit Table
+    print_comparison_report(change_records, dry_run)
+
+    if has_updates and not dry_run:
+        data["lastUpdated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        data["version"] = data.get("version", 1) + 1
+        os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
+        with open(OUTPUT_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+        print(f"[SUCCESS] Committed updated rate tables to {OUTPUT_FILE}")
+    elif not has_updates:
+        print("[INFO] No changes detected. All online tables match current cache.")
 
 
 if __name__ == "__main__":

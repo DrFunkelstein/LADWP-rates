@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-08-24",
+  "lastUpdated": "2026-09-01",
   "fixed": {
     "dailyCharge": 0.794,
     "baselineCredit": 0.10108,
-    "climateCredit": 86.00,
-    "nscRate": 0.03500,
-    "sbpExportRate": 0.06500
+    "climateCredit": 86.0,
+    "nscRate": 0.035,
+    "sbpExportRate": 0.065
   },
   "plans": {
     "Domestic": {
@@ -20,7 +20,7 @@
     },
     "TOU-D-4": {
       "summer": {
-        "onPeak": 0.58530,
+        "onPeak": 0.5853,
         "midPeak": 0.46523,
         "offPeak": 0.34698,
         "superOffPeak": 0.34698
@@ -28,7 +28,7 @@
       "winter": {
         "onPeak": 0.51159,
         "midPeak": 0.51159,
-        "offPeak": 0.37550,
+        "offPeak": 0.3755,
         "superOffPeak": 0.33636
       }
     },
@@ -40,8 +40,8 @@
         "superOffPeak": 0.34562
       },
       "winter": {
-        "onPeak": 0.60860,
-        "midPeak": 0.60860,
+        "onPeak": 0.6086,
+        "midPeak": 0.6086,
         "offPeak": 0.38232,
         "superOffPeak": 0.32575
       }
@@ -54,8 +54,8 @@
         "superOffPeak": 0.26786
       },
       "winter": {
-        "onPeak": 0.56580,
-        "midPeak": 0.56580,
+        "onPeak": 0.5658,
+        "midPeak": 0.5658,
         "offPeak": 0.24743,
         "superOffPeak": 0.24743
       }
@@ -77,22 +77,22 @@
         },
         "lean": {
           "name": "Lean Power (40%)",
-          "rateAdder": -0.0020
+          "rateAdder": -0.002
         }
       }
     },
     "OCPA": {
       "name": "Orange County Power",
       "fullName": "Orange County Power Authority",
-      "pciaRate": 0.0190,
+      "pciaRate": 0.019,
       "tiers": {
         "100_renewable": {
           "name": "100% Renewable",
-          "rateAdder": 0.0150
+          "rateAdder": 0.015
         },
         "smart_choice": {
           "name": "Smart Choice (38%)",
-          "rateAdder": 0.0000
+          "rateAdder": 0.0
         }
       }
     },
@@ -103,11 +103,11 @@
       "tiers": {
         "100_green": {
           "name": "100% Green (City Default)",
-          "rateAdder": 0.0150
+          "rateAdder": 0.015
         },
         "green_start": {
           "name": "Green Start (Standard)",
-          "rateAdder": 0.0000
+          "rateAdder": 0.0
         }
       }
     },
@@ -118,11 +118,11 @@
       "tiers": {
         "3c_prime": {
           "name": "3Cprime (100% Green)",
-          "rateAdder": 0.0150
+          "rateAdder": 0.015
         },
         "3c_choice": {
           "name": "3Cchoice (Standard Clean)",
-          "rateAdder": 0.0000
+          "rateAdder": 0.0
         }
       }
     },
@@ -133,11 +133,11 @@
       "tiers": {
         "more_clean": {
           "name": "More Clean (50%)",
-          "rateAdder": 0.0050
+          "rateAdder": 0.005
         },
         "core_choice": {
           "name": "Core Choice (38%)",
-          "rateAdder": -0.0020
+          "rateAdder": -0.002
         }
       }
     },
@@ -148,11 +148,11 @@
       "tiers": {
         "smart_power": {
           "name": "SmartPower (100% Solar)",
-          "rateAdder": 0.0150
+          "rateAdder": 0.015
         },
         "clear_choice": {
           "name": "ClearChoice (38%)",
-          "rateAdder": -0.0020
+          "rateAdder": -0.002
         }
       }
     },
@@ -163,11 +163,11 @@
       "tiers": {
         "prime_green": {
           "name": "PRIME Green (100%)",
-          "rateAdder": 0.0150
+          "rateAdder": 0.015
         },
         "prime_future": {
           "name": "PRIME Future (50%)",
-          "rateAdder": 0.0000
+          "rateAdder": 0.0
         }
       }
     },
@@ -178,11 +178,11 @@
       "tiers": {
         "100_green": {
           "name": "100% Green",
-          "rateAdder": 0.0150
+          "rateAdder": 0.015
         },
         "choice": {
           "name": "Pomona Choice (Standard)",
-          "rateAdder": 0.0000
+          "rateAdder": 0.0
         }
       }
     },
@@ -193,11 +193,11 @@
       "tiers": {
         "carbon_free": {
           "name": "100% Carbon-Free",
-          "rateAdder": 0.0150
+          "rateAdder": 0.015
         },
         "desert_saver": {
           "name": "Desert Saver",
-          "rateAdder": -0.0050
+          "rateAdder": -0.005
         }
       }
     },
@@ -208,11 +208,11 @@
       "tiers": {
         "prime_green": {
           "name": "San Jacinto Prime Green (100%)",
-          "rateAdder": 0.0150
+          "rateAdder": 0.015
         },
         "clean_power": {
           "name": "Clean Power (Standard)",
-          "rateAdder": 0.0000
+          "rateAdder": 0.0
         }
       }
     },
@@ -223,11 +223,11 @@
       "tiers": {
         "premium_renewable": {
           "name": "Premium Renewable (100%)",
-          "rateAdder": 0.0150
+          "rateAdder": 0.015
         },
         "base_choice": {
           "name": "Base Choice (50%)",
-          "rateAdder": -0.0050
+          "rateAdder": -0.005
         }
       }
     },
@@ -238,11 +238,11 @@
       "tiers": {
         "100_green": {
           "name": "Palmdale 100% Green",
-          "rateAdder": 0.0150
+          "rateAdder": 0.015
         },
         "clean_choice": {
           "name": "Clean Choice (50%)",
-          "rateAdder": 0.0000
+          "rateAdder": 0.0
         }
       }
     }

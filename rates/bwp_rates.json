@@ -1,28 +1,28 @@
 {
-  "lastUpdated": "2026-08-16",
+  "lastUpdated": "2026-09-01",
   "utility": "Burbank Water and Power",
   "electric": {
-    "customerServiceCharge": 19.50,
+    "customerServiceCharge": 19.5,
     "serviceSizeCharge": 4.45,
-    "ecac": 0.03400,
-    "taxRate": 0.070,
+    "ecac": 0.034,
+    "taxRate": 0.07,
     "tier1Limit": 300.0,
-    "tier1EnergyRate": 0.14600,
-    "tier2EnergyRate": 0.24420,
-    "sbpExportRate": 0.09100,
-    "nscRate": 0.04500
+    "tier1EnergyRate": 0.146,
+    "tier2EnergyRate": 0.2442,
+    "sbpExportRate": 0.091,
+    "nscRate": 0.045
   },
   "water": {
     "monthlyAvailabilityCharge": 24.87,
-    "wcac": 2.82500,
+    "wcac": 2.825,
     "limits": {
       "tier1": 8.0,
       "tier2": 20.0
     },
     "baseRates": {
-      "tier1": 1.78500,
-      "tier2": 3.49100,
-      "tier3": 4.31500
+      "tier1": 1.785,
+      "tier2": 3.491,
+      "tier3": 4.315
     }
   }
 }

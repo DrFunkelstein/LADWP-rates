@@ -3,8 +3,8 @@
 Glendale Water & Power (GWP) Automated Rate Scraper & Verification Engine
 Features:
 - Multi-tier WAF bypass (Direct -> TLS Impersonation -> Jina Gateway)
+- Strict section-isolated parsing preventing Summer/Winter TOU cross-contamination
 - Full rate change verification table matching LADWP
-- Auto-commit to rates/gwp_rates.json
 """
 
 import argparse
@@ -69,12 +69,6 @@ def parse_args():
 
 
 def fetch_page_content(verbose: bool) -> tuple[str, str]:
-    """
-    3-Tier Fetch Engine:
-    1. Direct Requests
-    2. curl_cffi (Chrome TLS Impersonator)
-    3. Jina Reader Gateway (Bypasses WAF completely)
-    """
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -101,18 +95,16 @@ def fetch_page_content(verbose: bool) -> tuple[str, str]:
         if r.status_code == 200 and len(r.text) > 1000:
             return r.text, "TLS Impersonator"
     except ImportError:
-        if verbose:
-            print("[!] Strategy 2 skipped: curl_cffi not installed.")
+        pass
     except Exception as e:
         if verbose:
             print(f"[!] Strategy 2 failed: {e}")
 
-    # Strategy 3: Jina Reader Gateway (100% reliable in CI)
+    # Strategy 3: Jina Reader Gateway
     try:
         if verbose:
             print(f"[*] Strategy 3: Proxying via Gateway ({GATEWAY_URL})...")
-        gateway_headers = {"User-Agent": "MeterWise/1.4.0 (Automation)"}
-        r = requests.get(GATEWAY_URL, headers=gateway_headers, timeout=20)
+        r = requests.get(GATEWAY_URL, headers={"User-Agent": "MeterWise/1.4.0"}, timeout=20)
         if r.status_code == 200 and len(r.text) > 500:
             return r.text, "Gateway"
     except Exception as e:
@@ -122,44 +114,89 @@ def fetch_page_content(verbose: bool) -> tuple[str, str]:
     raise RuntimeError("All network fetch strategies failed.")
 
 
-def parse_gwp_rates(content: str, source_type: str, existing_data: dict) -> dict:
+def parse_rate_value(pattern: str, text_block: str, default: float) -> float:
+    match = re.search(pattern, text_block, re.IGNORECASE)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return default
+    return default
+
+
+def parse_gwp_rates(content: str, existing_data: dict, verbose: bool) -> dict:
     text = content
     if "<html" in content.lower():
         soup = BeautifulSoup(content, "html.parser")
         text = soup.get_text(separator=" ")
 
-    # Normalize whitespace & characters
     clean_text = text.replace("&nbsp;", " ").replace("\xa0", " ")
 
-    # 1. Customer Charge ($0.75/day)
+    # Customer Charge ($0.75/day)
     cust_match = re.search(r"Customer\s+Charge\s*-\s*per\s+meter\s+per\s+day[^\$]+?\$([\d\.]+)", clean_text, re.IGNORECASE)
     cust_charge = float(cust_match.group(1)) if cust_match else 0.75
 
-    # 2. Standard L-1-A High Season (July through October)
-    h_t1 = re.search(r"July\s+through\s+October[^\$]+?First\s+10\s*kWh[^\$]+?\$([\d\.]+)", clean_text, re.IGNORECASE)
-    h_t2 = re.search(r"July\s+through\s+October[^\$]+?Next\s+10\s*kWh[^\$]+?\$([\d\.]+)", clean_text, re.IGNORECASE)
-    h_t3 = re.search(r"July\s+through\s+October[^\$]+?Remaining\s+kWh[^\$]+?\$([\d\.]+)", clean_text, re.IGNORECASE)
+    # =========================================================================
+    # 1. ISOLATE L-1-A STANDARD SECTION
+    # =========================================================================
+    l1a_block = clean_text
+    if "L-1-B" in clean_text:
+        l1a_block = clean_text.split("L-1-B")[0]
 
-    # 3. Standard L-1-A Low Season (November through June)
-    l_t1 = re.search(r"November\s+through\s+June[^\$]+?First\s+10\s*kWh[^\$]+?\$([\d\.]+)", clean_text, re.IGNORECASE)
-    l_t2 = re.search(r"November\s+through\s+June[^\$]+?Next\s+10\s*kWh[^\$]+?\$([\d\.]+)", clean_text, re.IGNORECASE)
-    l_t3 = re.search(r"November\s+through\s+June[^\$]+?Remaining\s+kWh[^\$]+?\$([\d\.]+)", clean_text, re.IGNORECASE)
+    # Split L-1-A into High (July-Oct) and Low (Nov-Jun)
+    l1a_high_block = l1a_block
+    l1a_low_block = l1a_block
 
-    # 4. TOU L-1-B High Season
-    h_tou_base = re.search(r"L-1-B[\s\S]*?July\s+through\s+October[\s\S]*?Base\s+Period[^\$]+?\$([\d\.]+)", clean_text, re.IGNORECASE)
-    h_tou_peak = re.search(r"L-1-B[\s\S]*?July\s+through\s+October[\s\S]*?Peak\s+Period[^\$]+?\$([\d\.]+)", clean_text, re.IGNORECASE)
+    if "July through October" in l1a_block and "November through June" in l1a_block:
+        parts = l1a_block.split("November through June")
+        l1a_high_block = parts[0]
+        l1a_low_block = parts[1]
 
-    # 5. TOU L-1-B Low Season
-    l_tou_base = re.search(r"L-1-B[\s\S]*?November\s+through\s+June[\s\S]*?Base\s+Period[^\$]+?\$([\d\.]+)", clean_text, re.IGNORECASE)
-    l_tou_peak = re.search(r"L-1-B[\s\S]*?November\s+through\s+June[\s\S]*?Peak\s+Period[^\$]+?\$([\d\.]+)", clean_text, re.IGNORECASE)
+    h_t1 = parse_rate_value(r"First\s+10\s*kWh[^\$]+?\$([\d\.]+)", l1a_high_block, 0.3071)
+    h_t2 = parse_rate_value(r"Next\s+10\s*kWh[^\$]+?\$([\d\.]+)", l1a_high_block, 0.3806)
+    h_t3 = parse_rate_value(r"Remaining\s+kWh[^\$]+?\$([\d\.]+)", l1a_high_block, 0.4547)
 
+    l_t1 = parse_rate_value(r"First\s+10\s*kWh[^\$]+?\$([\d\.]+)", l1a_low_block, 0.2575)
+    l_t2 = parse_rate_value(r"Next\s+10\s*kWh[^\$]+?\$([\d\.]+)", l1a_low_block, 0.3189)
+    l_t3 = parse_rate_value(r"Remaining\s+kWh[^\$]+?\$([\d\.]+)", l1a_low_block, 0.3935)
+
+    # =========================================================================
+    # 2. ISOLATE L-1-B TIME-OF-USE SECTION
+    # =========================================================================
+    l1b_block = clean_text
+    if "L-1-B" in clean_text:
+        l1b_block = clean_text.split("L-1-B")[1]
+    if "L-1-D" in l1b_block:
+        l1b_block = l1b_block.split("L-1-D")[0]
+
+    # Split L-1-B tables cleanly between High and Low Season tables
+    # Find occurrences of July through October and November through June inside L-1-B
+    high_match = re.search(r"July\s+through\s+October\s*\(High\s+Season\)", l1b_block, re.IGNORECASE)
+    low_match = re.search(r"November\s+through\s+June\s*\(Low\s+Season\)", l1b_block, re.IGNORECASE)
+
+    if high_match and low_match and high_match.start() < low_match.start():
+        tou_high_section = l1b_block[high_match.start():low_match.start()]
+        tou_low_section = l1b_block[low_match.start():]
+    else:
+        # Fallback split if headers omit '(High Season)' parenthetical
+        parts = re.split(r"November\s+through\s+June", l1b_block, flags=re.IGNORECASE)
+        tou_high_section = parts[0]
+        tou_low_section = parts[-1] if len(parts) > 1 else l1b_block
+
+    h_tou_base = parse_rate_value(r"Base\s+Period[^\$]+?\$([\d\.]+)", tou_high_section, 0.2280)
+    h_tou_peak = parse_rate_value(r"Peak\s+Period[^\$]+?\$([\d\.]+)", tou_high_section, 0.6839)
+
+    l_tou_base = parse_rate_value(r"Base\s+Period[^\$]+?\$([\d\.]+)", tou_low_section, 0.1901)
+    l_tou_peak = parse_rate_value(r"Peak\s+Period[^\$]+?\$([\d\.]+)", tou_low_section, 0.5700)
+
+    # Preserve cached water rates
     water_data = existing_data.get("water", {
         "dailyCustomerCharge": 0.881,
         "limits": { "tier1": 8.0, "tier2": 15.0 },
         "rates": { "tier1": 2.80, "tier2": 4.11, "tier3": 4.28 }
     })
 
-    parsed = {
+    return {
         "lastUpdated": datetime.now().strftime("%Y-%m-%d"),
         "utility": "GWP",
         "electric": {
@@ -170,30 +207,29 @@ def parse_gwp_rates(content: str, source_type: str, existing_data: dict) -> dict
                 "tier1DailyKwh": 10.0,
                 "tier2DailyKwh": 10.0,
                 "highSeason": {
-                    "tier1": float(h_t1.group(1)) if h_t1 else 0.3071,
-                    "tier2": float(h_t2.group(1)) if h_t2 else 0.3806,
-                    "tier3": float(h_t3.group(1)) if h_t3 else 0.4547
+                    "tier1": h_t1,
+                    "tier2": h_t2,
+                    "tier3": h_t3
                 },
                 "lowSeason": {
-                    "tier1": float(l_t1.group(1)) if l_t1 else 0.2575,
-                    "tier2": float(l_t2.group(1)) if l_t2 else 0.3189,
-                    "tier3": float(l_t3.group(1)) if l_t3 else 0.3935
+                    "tier1": l_t1,
+                    "tier2": l_t2,
+                    "tier3": l_t3
                 }
             },
             "tou": {
                 "highSeason": {
-                    "peak": float(h_tou_peak.group(1)) if h_tou_peak else 0.6839,
-                    "offPeak": float(h_tou_base.group(1)) if h_tou_base else 0.2280
+                    "peak": h_tou_peak,
+                    "offPeak": h_tou_base
                 },
                 "lowSeason": {
-                    "peak": float(l_tou_peak.group(1)) if l_tou_peak else 0.5700,
-                    "offPeak": float(l_tou_base.group(1)) if l_tou_base else 0.1901
+                    "peak": l_tou_peak,
+                    "offPeak": l_tou_base
                 }
             }
         },
         "water": water_data
     }
-    return parsed
 
 
 def load_existing_json() -> dict:
@@ -266,7 +302,7 @@ def main():
 
     try:
         content, source_engine = fetch_page_content(args.verbose)
-        parsed_data = parse_gwp_rates(content, source_engine, existing_data)
+        parsed_data = parse_gwp_rates(content, existing_data, args.verbose)
 
         change_records: list[RateChangeRecord] = []
         
@@ -284,7 +320,7 @@ def main():
         change_records.append(RateChangeRecord("L-1-A Standard", "Winter", "Tier 2", old_std_l.get("tier2", 0.3189), new_std_l["tier2"]))
         change_records.append(RateChangeRecord("L-1-A Standard", "Winter", "Tier 3", old_std_l.get("tier3", 0.3935), new_std_l["tier3"]))
 
-        # TOU Rates
+        # TOU Rates (High Season & Low Season)
         old_tou_h = existing_data["electric"]["tou"]["highSeason"]
         new_tou_h = parsed_data["electric"]["tou"]["highSeason"]
         old_tou_l = existing_data["electric"]["tou"]["lowSeason"]
@@ -305,9 +341,9 @@ def main():
             os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
             with open(OUTPUT_FILE, "w") as f:
                 json.dump(parsed_data, f, indent=2)
-            print(f"[SUCCESS] Scraped via {source_engine} and updated {OUTPUT_FILE} successfully.")
+            print(f"[SUCCESS] Verified and committed GWP rate table to {OUTPUT_FILE}")
     except Exception as e:
-        print(f"[ERROR] GWP Scraper encountered an unrecoverable error: {e}", file=sys.stderr)
+        print(f"[ERROR] GWP Scraper encountered an error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

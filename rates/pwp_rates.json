@@ -1,18 +1,18 @@
 {
-  "lastUpdated": "2026-08-15",
+  "lastUpdated": "2026-09-01",
   "utility": "PWP",
   "electric": {
     "fixed": {
-      "customerCharge": 11.00,
-      "gridAccessCharge": 6.50,
+      "customerCharge": 11.0,
+      "gridAccessCharge": 6.5,
       "taxRate": 0.07872
     },
     "energyCharge": 0.100825,
-    "transmissionCharge": 0.016090,
+    "transmissionCharge": 0.01609,
     "distribution": {
-      "tier1": 0.035050,
-      "tier2": 0.140180,
-      "tier3": 0.252330
+      "tier1": 0.03505,
+      "tier2": 0.14018,
+      "tier3": 0.25233
     },
     "limits": {
       "tier1": 350.0,

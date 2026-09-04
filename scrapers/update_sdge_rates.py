@@ -16,7 +16,6 @@ import re
 import os
 import argparse
 from datetime import datetime
-from urllib.parse import urljoin
 
 # --- RESOLVE FOLDER PATHS ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -42,7 +41,6 @@ for p in CANDIDATE_PATHS:
 
 PRICING_URL = "https://www.sdge.com/residential/pricing-plans"
 EXCESS_GEN_URL = "https://www.sdge.com/residential/savings-center/solar-power-renewable-energy/net-energy-metering/billing-information/excess-generation"
-SDGE_CCA_HUB_URL = "https://www.sdge.com/customer-choice/community-choice-aggregation/joint-rate-comparison"
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
@@ -62,23 +60,72 @@ PLAN_MAP = {
     "EV-TOU": "EV-TOU"
 }
 
-DEFAULT_SDGE_CCA_PROFILES = {
-    "SDCP": {
-        "name": "SD Community Power",
-        "fullName": "San Diego Community Power",
-        "tiers": {
-            "power100": { "name": "Power100 (100% Clean)", "rateAdder": 0.0150 },
-            "powerplus": { "name": "PowerPlus (50% Clean)", "rateAdder": -0.0050 },
-            "optOut": { "name": "Opted Out (100% SDG&E)", "rateAdder": 0.0 }
+# Complete fallback baseline schema matching SDGERatesJSON.swift
+DEFAULT_SDGE_RATES = {
+    "lastUpdated": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    "nbcRate": 0.00591,
+    "baselineCredit": 0.10892,
+    "minimumBillDaily": 0.38400,
+    "nscRate": 0.02749,
+    "sbpDeliveryExportRate": 0.03870,
+    "sbpGenerationExportRate": 0.05613,
+    "sbpExportRate": 0.09483,
+    "plans": {
+        "TOU-DR1": {
+            "hasBaseline": True, "monthlySubscriptionFee": 0.0, "dailyServiceCharge": 0.79343, "dailyServiceChargeLowIncome": 0.0,
+            "summer": { "onPeak": 0.69572, "offPeak": 0.47505, "superOffPeak": 0.38773 },
+            "winter": { "onPeak": 0.62127, "offPeak": 0.53956, "superOffPeak": 0.44880 }
+        },
+        "TOU-DR2": {
+            "hasBaseline": True, "monthlySubscriptionFee": 0.0, "dailyServiceCharge": 0.79343, "dailyServiceChargeLowIncome": 0.0,
+            "summer": { "onPeak": 0.70021, "offPeak": 0.42886, "superOffPeak": 0.28145 },
+            "winter": { "onPeak": 0.62127, "offPeak": 0.48429, "superOffPeak": 0.31145 }
+        },
+        "TOU-ELEC": {
+            "hasBaseline": False, "monthlySubscriptionFee": 16.00, "dailyServiceCharge": 0.31343, "dailyServiceChargeLowIncome": 0.0,
+            "summer": { "onPeak": 0.72569, "offPeak": 0.39824, "superOffPeak": 0.35516 },
+            "winter": { "onPeak": 0.51190, "offPeak": 0.38653, "superOffPeak": 0.34735 }
+        },
+        "DR-SES": {
+            "hasBaseline": False, "monthlySubscriptionFee": 0.0, "dailyServiceCharge": 0.79343, "dailyServiceChargeLowIncome": 0.0,
+            "summer": { "onPeak": 0.74909, "offPeak": 0.45201, "superOffPeak": 0.36037 },
+            "winter": { "onPeak": 0.47880, "offPeak": 0.42227, "superOffPeak": 0.35300 }
+        },
+        "EV-TOU-5": {
+            "hasBaseline": False, "monthlySubscriptionFee": 16.00, "dailyServiceCharge": 0.31343, "dailyServiceChargeLowIncome": 0.0,
+            "summer": { "onPeak": 0.80292, "offPeak": 0.50584, "superOffPeak": 0.12852 },
+            "winter": { "onPeak": 0.53263, "offPeak": 0.47610, "superOffPeak": 0.12115 }
+        },
+        "Standard DR": {
+            "hasBaseline": True, "monthlySubscriptionFee": 0.0, "dailyServiceCharge": 0.79343, "dailyServiceChargeLowIncome": 0.0,
+            "summer": { "onPeak": 0.42034, "offPeak": 0.52926, "superOffPeak": 0.52926 },
+            "winter": { "onPeak": 0.42034, "offPeak": 0.52926, "superOffPeak": 0.52926 }
         }
     },
-    "CEA": {
-        "name": "Clean Energy Alliance",
-        "fullName": "Clean Energy Alliance (North San Diego County)",
-        "tiers": {
-            "green_impact": { "name": "Green Impact (100%)", "rateAdder": 0.0150 },
-            "clean_impact": { "name": "Clean Impact (50%)", "rateAdder": -0.0050 },
-            "optOut": { "name": "Opted Out (100% SDG&E)", "rateAdder": 0.0 }
+    "gas": {
+        "procurement": 0.45621,
+        "transportation": { "tier1": 1.08231, "tier2": 1.42541 },
+        "fixed": { "customerCharge": 0.15123, "ppps": 0.18432, "regulatory": 0.00420 },
+        "allowances": { "winter": 1.644, "summer": 0.526 }
+    },
+    "cca": {
+        "SDCP": {
+            "name": "SD Community Power",
+            "fullName": "San Diego Community Power",
+            "tiers": {
+                "power100": { "name": "Power100 (100% Clean)", "rateAdder": 0.0150 },
+                "powerplus": { "name": "PowerPlus (50% Clean)", "rateAdder": -0.0050 },
+                "optOut": { "name": "Opted Out (100% SDG&E)", "rateAdder": 0.0 }
+            }
+        },
+        "CEA": {
+            "name": "Clean Energy Alliance",
+            "fullName": "Clean Energy Alliance (North San Diego County)",
+            "tiers": {
+                "green_impact": { "name": "Green Impact (100%)", "rateAdder": 0.0150 },
+                "clean_impact": { "name": "Clean Impact (50%)", "rateAdder": -0.0050 },
+                "optOut": { "name": "Opted Out (100% SDG&E)", "rateAdder": 0.0 }
+            }
         }
     }
 }
@@ -114,7 +161,7 @@ def extract_cents(text):
 
 def fetch_sdge_nsc_rate():
     print(f"[*] Scanning SDG&E True-Up Excess Generation Table: {EXCESS_GEN_URL}")
-    nsc_rate = 0.02749  # Active 2025-2026 CPUC 12-month rolling average
+    nsc_rate = 0.02749
     now = datetime.now()
     current_year_str = str(now.year)
     
@@ -219,13 +266,18 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Print comparison report without writing to disk")
     args = parser.parse_args()
 
-    existing_json = {}
+    existing_json = json.loads(json.dumps(DEFAULT_SDGE_RATES))
     if os.path.exists(RATES_FILE):
         try:
             with open(RATES_FILE, 'r') as f:
-                existing_json = json.load(f)
-        except Exception:
-            pass
+                loaded = json.load(f)
+                if isinstance(loaded, dict) and "plans" in loaded:
+                    existing_json = loaded
+                    print(f"[*] Loaded existing rate file: {RATES_FILE}")
+        except Exception as e:
+            print(f"[!] Notice: Initializing from default schema ({e})")
+    else:
+        print(f"[*] Initializing from default baseline schema (File not yet at {RATES_FILE})")
 
     updated_json = json.loads(json.dumps(existing_json))
     now = datetime.now()
@@ -273,8 +325,9 @@ def main():
 
     # 3. CCA Sync
     if "cca" not in updated_json: updated_json["cca"] = {}
-    for cca_id, profile in DEFAULT_SDGE_CCA_PROFILES.items():
-        updated_json["cca"][cca_id] = profile
+    for cca_id, profile in DEFAULT_SDGE_RATES["cca"].items():
+        if cca_id not in updated_json["cca"]:
+            updated_json["cca"][cca_id] = profile
 
     print_comparison_table(existing_json, updated_json, is_dry_run=args.dry_run)
 

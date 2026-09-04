@@ -87,15 +87,22 @@ DEFAULT_SDGE_CCA_PROFILES = {
 class RateChangeRecord:
     def __init__(self, item_name: str, old_rate: float, new_rate: float):
         self.item_name = item_name
-        self.old_rate = old_rate
-        self.new_rate = new_rate
-        self.delta = new_rate - old_rate
-        self.pct_change = (self.delta / old_rate * 100) if old_rate > 0 else 0.0
+        self.old_rate = round(float(old_rate), 5)
+        self.new_rate = round(float(new_rate), 5)
+        self.delta = round(self.new_rate - self.old_rate, 5)
+        if self.old_rate > 0:
+            self.pct_change = round((self.delta / self.old_rate) * 100, 2)
+        else:
+            self.pct_change = 0.0
 
     @property
     def status(self) -> str:
-        if abs(self.delta) < 0.00001: return "UNCHANGED"
-        if abs(self.pct_change) <= 25.0: return "REASONABLE"
+        if abs(self.delta) < 0.000001:
+            return "UNCHANGED"
+        if self.old_rate == 0.0:
+            return "NEW ENTRY"
+        if abs(self.pct_change) <= 25.0:
+            return "REASONABLE"
         return "WARN: LARGE SHIFT"
 
 
@@ -185,10 +192,16 @@ def print_comparison_table(existing_data, new_data, is_dry_run):
 
     for r in records:
         delta_str = f"{r.delta:+.5f}" if abs(r.delta) >= 0.00001 else "$0.00000"
-        pct_str = f"{r.pct_change:+.2f}%" if abs(r.delta) >= 0.00001 else "0.00%"
         
+        if r.status == "NEW ENTRY":
+            pct_str = "NEW"
+        elif r.status == "UNCHANGED":
+            pct_str = "0.00%"
+        else:
+            pct_str = f"{r.pct_change:+.2f}%"
+
         status_tag = f"[{r.status}]"
-        if r.status == "REASONABLE":
+        if r.status in ["REASONABLE", "NEW ENTRY"]:
             updated_count += 1
         elif r.status == "WARN: LARGE SHIFT":
             updated_count += 1

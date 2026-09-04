@@ -5,7 +5,8 @@ Fetches and parses:
 - Bundled Residential Tariffs (Excel: res-inclu-tou-current.xlsx)
 - Baseline Quantities Table (Territories T, P, R, S, X)
 - Solar Net Surplus Compensation PDF (AB 920 Rate Table)
-- Live CCA Joint Rate Comparison PDFs (CleanPowerSF, Ava, PCE, MCE, SVCE, SJCE, 3CE, SCP)
+- Base Services charges & EV-B Meter Charges
+- All 11 PG&E CCA profiles
 """
 
 import os
@@ -20,104 +21,163 @@ from datetime import datetime
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
-# --- CONFIGURATION ---
 XLSX_URL = "https://www.pge.com/assets/rates/tariffs/res-inclu-tou-current.xlsx"
 PGE_NSC_PDF_URL = "https://www.pge.com/assets/pge/docs/clean-energy/solar/AB920-RateTable.pdf"
 PGE_CCA_HUB_URL = "https://www.pge.com/en/account/alternate-energy-providers/community-choice-aggregation.html"
 
+# --- RESOLVE FOLDER PATHS ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
-JSON_FILE = os.path.normpath(os.path.join(ROOT_DIR, "rates", "pge_rates.json"))
+if os.path.basename(SCRIPT_DIR) == "scripts":
+    ROOT_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+else:
+    ROOT_DIR = SCRIPT_DIR
+
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+CANDIDATE_PATHS = [
+    os.path.join(ROOT_DIR, "rates", "pge_rates.json"),
+    os.path.join(ROOT_DIR, "pge_rates.json"),
+    os.path.join(SCRIPT_DIR, "pge_rates.json")
+]
+
+JSON_FILE = CANDIDATE_PATHS[0]
+for p in CANDIDATE_PATHS:
+    if os.path.exists(p):
+        JSON_FILE = p
+        break
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
 }
 
-# Verified Default CCA Profiles for all 8 PG&E CCAs
 DEFAULT_PGE_CCA_PROFILES = {
-    "SJCE": {
-        "name": "San Jose Clean Energy",
-        "fullName": "San Jose Clean Energy (City of San Jose)",
-        "tiers": {
-            "totalgreen": {"name": "TotalGreen (100% Renewable)", "rateAdder": 0.0180},
-            "greensource": {"name": "GreenSource (62% Clean)", "rateAdder": -0.0050}
-        }
-    },
-    "3CE_PGE": {
-        "name": "Central Coast Energy",
-        "fullName": "Central Coast Community Energy",
-        "tiers": {
-            "3c_prime": {"name": "3Cprime (100% Clean)", "rateAdder": 0.0150},
-            "3c_choice": {"name": "3Cchoice (Standard)", "rateAdder": -0.0050}
-        }
-    },
-    "SCP": {
-        "name": "Sonoma Clean Power",
-        "fullName": "Sonoma Clean Power (Sonoma & Mendocino)",
-        "tiers": {
-            "evergreen": {"name": "Evergreen (100% Local)", "rateAdder": 0.0250},
-            "cleanstart": {"name": "CleanStart (Default)", "rateAdder": -0.0050}
-        }
-    },
     "CLEANPOWERSF": {
         "name": "CleanPowerSF",
         "fullName": "CleanPowerSF (San Francisco)",
+        "pciaRate": 0.0150,
         "tiers": {
-            "supergreen": {"name": "SuperGreen (100%)", "rateAdder": 0.0200},
-            "green": {"name": "Green (50%)", "rateAdder": -0.0050}
+            "supergreen": { "name": "SuperGreen (100%)", "rateAdder": 0.0200 },
+            "green": { "name": "Green (50%)", "rateAdder": -0.0050 },
+            "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0 }
         }
     },
     "AVA": {
         "name": "Ava Community Energy",
         "fullName": "Ava Community Energy (East Bay / Alameda)",
+        "pciaRate": 0.0150,
         "tiers": {
-            "renewable100": {"name": "Renewable 100", "rateAdder": 0.0150},
-            "bright_choice": {"name": "Bright Choice", "rateAdder": -0.0075}
+            "renewable100": { "name": "Renewable 100", "rateAdder": 0.0150 },
+            "bright_choice": { "name": "Bright Choice", "rateAdder": -0.0075 },
+            "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0 }
         }
     },
     "PCE": {
         "name": "Peninsula Clean Energy",
         "fullName": "Peninsula Clean Energy (San Mateo County)",
+        "pciaRate": 0.0150,
         "tiers": {
-            "ecogreen": {"name": "ECO100 (100% Renewable)", "rateAdder": 0.0100},
-            "ecoplus": {"name": "ECOplus (50% Renewable)", "rateAdder": -0.0100}
+            "ecogreen": { "name": "ECO100 (100% Renewable)", "rateAdder": 0.0100 },
+            "ecoplus": { "name": "ECOplus (50% Renewable)", "rateAdder": -0.0100 },
+            "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0 }
         }
     },
     "MCE": {
         "name": "MCE Clean Energy",
         "fullName": "MCE (Marin, Napa, Solano, Contra Costa)",
+        "pciaRate": 0.0150,
         "tiers": {
-            "deep_green": {"name": "Deep Green (100%)", "rateAdder": 0.0150},
-            "light_green": {"name": "Light Green (60%)", "rateAdder": 0.0000}
+            "deep_green": { "name": "Deep Green (100%)", "rateAdder": 0.0150 },
+            "light_green": { "name": "Light Green (60%)", "rateAdder": 0.0 },
+            "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0 }
         }
     },
     "SVCE": {
         "name": "Silicon Valley Clean Energy",
         "fullName": "Silicon Valley Clean Energy (Santa Clara County)",
+        "pciaRate": 0.0150,
         "tiers": {
-            "greenprime": {"name": "GreenPrime (100%)", "rateAdder": 0.0150},
-            "greenstart": {"name": "GreenStart (Standard)", "rateAdder": 0.0000}
+            "greenprime": { "name": "GreenPrime (100%)", "rateAdder": 0.0150 },
+            "greenstart": { "name": "GreenStart (Standard)", "rateAdder": 0.0 },
+            "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0 }
+        }
+    },
+    "SJCE": {
+        "name": "San Jose Clean Energy",
+        "fullName": "San Jose Clean Energy (City of San Jose)",
+        "pciaRate": 0.0150,
+        "tiers": {
+            "totalgreen": { "name": "TotalGreen (100% Renewable)", "rateAdder": 0.0180 },
+            "greensource": { "name": "GreenSource (62% Clean)", "rateAdder": -0.0050 },
+            "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0 }
+        }
+    },
+    "3CE_PGE": {
+        "name": "Central Coast Energy",
+        "fullName": "Central Coast Community Energy (Central Coast)",
+        "pciaRate": 0.0150,
+        "tiers": {
+            "3c_prime": { "name": "3Cprime (100% Clean)", "rateAdder": 0.0150 },
+            "3c_choice": { "name": "3Cchoice (Standard)", "rateAdder": -0.0050 },
+            "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0 }
+        }
+    },
+    "SCP": {
+        "name": "Sonoma Clean Power",
+        "fullName": "Sonoma Clean Power (Sonoma & Mendocino)",
+        "pciaRate": 0.0150,
+        "tiers": {
+            "evergreen": { "name": "Evergreen (100% Local)", "rateAdder": 0.0250 },
+            "cleanstart": { "name": "CleanStart (Default)", "rateAdder": -0.0050 },
+            "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0 }
         }
     },
     "PIONEER": {
         "name": "Pioneer Community Energy",
-        "fullName": "Pioneer Community Energy (Placer & El Dorado Counties)",
-        "default_tiers": {"green100": 0.0150, "standard": -0.0050, "optOut": 0.0},
-        "jrc_url": "https://pioneercommunityenergy.org/rates/"
+        "fullName": "Pioneer Community Energy (Placer & El Dorado)",
+        "pciaRate": 0.0150,
+        "tiers": {
+            "green100": { "name": "100% Renewable", "rateAdder": 0.0150 },
+            "standard": { "name": "Standard Choice", "rateAdder": -0.0050 },
+            "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0 }
+        }
     },
     "VCE": {
         "name": "Valley Clean Energy",
         "fullName": "Valley Clean Energy (Yolo County)",
-        "default_tiers": {"ultragreen": 0.0150, "standardgreen": -0.0050, "optOut": 0.0},
-        "jrc_url": "https://valleycleanenergy.org/rates/"
+        "pciaRate": 0.0150,
+        "tiers": {
+            "ultragreen": { "name": "UltraGreen (100% Clean)", "rateAdder": 0.0150 },
+            "standardgreen": { "name": "Standard Green", "rateAdder": -0.0050 },
+            "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0 }
+        }
     },
     "RCEA": {
         "name": "Redwood Coast Energy",
         "fullName": "Redwood Coast Energy Authority (Humboldt County)",
-        "default_tiers": {"repower_plus": 0.0100, "repower": -0.0050, "optOut": 0.0},
-        "jrc_url": "https://redwoodenergy.org/residential-rates/"
+        "pciaRate": 0.0150,
+        "tiers": {
+            "repower_plus": { "name": "REpower+ (100% Renewable)", "rateAdder": 0.0100 },
+            "repower": { "name": "REpower (Standard)", "rateAdder": -0.0050 },
+            "optOut": { "name": "Opted Out (100% PG&E)", "rateAdder": 0.0 }
+        }
     }
 }
+
+
+class RateChangeRecord:
+    def __init__(self, item_name: str, old_rate: float, new_rate: float):
+        self.item_name = item_name
+        self.old_rate = old_rate
+        self.new_rate = new_rate
+        self.delta = new_rate - old_rate
+        self.pct_change = (self.delta / old_rate * 100) if old_rate > 0 else 0.0
+
+    @property
+    def status(self) -> str:
+        if abs(self.delta) < 0.00001: return "UNCHANGED"
+        if abs(self.pct_change) <= 25.0: return "REASONABLE"
+        return "WARN: LARGE SHIFT"
 
 
 def clean_val(val):
@@ -131,21 +191,8 @@ def clean_val(val):
         return 0.0
 
 
-def download_xlsx(url, save_path):
-    print(f"[Network] Downloading XLSX from: {url}")
-    try:
-        response = requests.get(url, headers=HEADERS, timeout=30)
-        response.raise_for_status()
-        with open(save_path, 'wb') as f:
-            f.write(response.content)
-        print(f"[Network] Download complete ({len(response.content)} bytes)")
-    except Exception as e:
-        print(f"[Error] Failed to download XLSX: {e}")
-        sys.exit(1)
-
-
 def fetch_pge_solar_clawback_rates():
-    print("\n[Solar Scan] Checking PG&E AB920 NSC Rate Table PDF...")
+    print(f"[*] Scanning PG&E AB920 NSC Rate Table PDF: {PGE_NSC_PDF_URL}")
     nsc_rate = 0.03200
     sbp_export_rate = 0.07500
     
@@ -164,15 +211,15 @@ def fetch_pge_solar_clawback_rates():
                 cleaned = [float(m.replace("$", "")) for m in matches if float(m.replace("$", "")) > 0.005]
                 if cleaned:
                     nsc_rate = cleaned[-1]
-                    print(f"  > Parsed Latest PG&E NSC Rate from PDF: ${nsc_rate:.5f}/kWh")
+                    print(f"  ✓ Parsed Latest PG&E NSC Rate from PDF: ${nsc_rate:.5f}/kWh")
     except Exception as e:
-        print(f"  [Warning] NSC PDF fetch error: {e}")
+        print(f"  [Notice] NSC PDF fetch notice: {e}")
 
     return {"nscRate": nsc_rate, "sbpExportRate": sbp_export_rate}
 
 
 def parse_pge_baseline_allowances(xlsx):
-    print("\n[Excel Scan] Scanning Baseline Quantities Sheet...")
+    print("[*] Parsing Baseline Quantities Sheet...")
     extracted_allowances = {t: {"summer": {}, "winter": {}} for t in ["T", "P", "R", "S", "X"]}
     territories = ["T", "P", "R", "S", "X"]
     
@@ -217,7 +264,7 @@ def parse_pge_baseline_allowances(xlsx):
 
 
 def parse_pge_xlsx(file_path):
-    print(f"\n[Excel Scan] Processing workbook...")
+    print("[*] Processing PG&E Excel workbook...")
     xlsx = pd.ExcelFile(file_path)
     extracted_data = {}
     baseline_credit_found = None
@@ -325,51 +372,6 @@ def cleanup_bins(data):
     return data
 
 
-def fetch_pge_cca_pdf_rates():
-    print("\n[CCA Scan] Crawling PG&E CCA Master Hub for JRC PDFs...")
-    cca_data = json.loads(json.dumps(DEFAULT_PGE_CCA_PROFILES))
-
-    try:
-        res = requests.get(PGE_CCA_HUB_URL, headers=HEADERS, timeout=20)
-        if res.status_code == 200:
-            soup = BeautifulSoup(res.text, "html.parser")
-            pdf_links = {}
-
-            for a in soup.find_all("a", href=True):
-                href = a["href"]
-                text_label = a.get_text().upper()
-                combined = (href + " " + text_label).upper()
-                
-                if ".PDF" in combined and ("COMPARISON" in combined or "RATE" in combined or "JOINT" in combined):
-                    full_url = urljoin(PGE_CCA_HUB_URL, href)
-                    if "AVA" in combined: pdf_links["AVA"] = full_url
-                    elif "CLEANPOWERSF" in combined: pdf_links["CLEANPOWERSF"] = full_url
-                    elif "SAN JOSE" in combined or "SJCE" in combined: pdf_links["SJCE"] = full_url
-                    elif "3CE" in combined or "CCCE" in combined: pdf_links["3CE_PGE"] = full_url
-                    elif "MCE" in combined or "MARIN" in combined: pdf_links["MCE"] = full_url
-                    elif "SVCE" in combined or "SILICON VALLEY" in combined: pdf_links["SVCE"] = full_url
-                    elif "PENINSULA" in combined or "WESTLIGHT" in combined or "PCE" in combined: pdf_links["PCE"] = full_url
-                    elif "SONOMA" in combined or "SCP" in combined: pdf_links["SCP"] = full_url
-
-            try:
-                import pypdf
-                for cca_key, pdf_url in pdf_links.items():
-                    p_res = requests.get(pdf_url, headers=HEADERS, timeout=15)
-                    if p_res.status_code == 200:
-                        reader = pypdf.PdfReader(io.BytesIO(p_res.content))
-                        pdf_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-                        matches = re.findall(r"\$?0\.0\d{3,5}", pdf_text)
-                        if matches:
-                            pass
-            except ImportError:
-                pass
-
-    except Exception as e:
-        print(f"  [Warning] CCA Crawler error: {e}")
-
-    return cca_data
-
-
 def flatten_json(d, parent_key="", sep="."):
     items = []
     for k, v in d.items():
@@ -384,46 +386,40 @@ def flatten_json(d, parent_key="", sep="."):
 def print_comparison_table(existing_data, new_data, is_dry_run):
     flat_existing = flatten_json(existing_data)
     flat_new = flatten_json(new_data)
-
     all_keys = sorted(list(set(flat_existing.keys()) | set(flat_new.keys())))
 
-    print("\n" + "=" * 84)
-    print(" " * 28 + "PG&E RATE COMPARISON REPORT")
-    print("=" * 84)
-    print(f"{'Tariff / CCA Item':<42} | {'Existing File':<14} | {'Scraped Value':<14} | {'Status'}")
-    print("-" * 84)
-
-    changes_count = 0
-
+    records: list[RateChangeRecord] = []
     for key in all_keys:
-        val_exist = flat_existing.get(key, "N/A")
-        val_new = flat_new.get(key, "N/A")
+        val_exist = flat_existing.get(key, 0.0)
+        val_new = flat_new.get(key, 0.0)
+        if isinstance(val_exist, (int, float)) and isinstance(val_new, (int, float)):
+            records.append(RateChangeRecord(key, float(val_exist), float(val_new)))
 
-        str_exist = f"${val_exist:.5f}" if isinstance(val_exist, float) else str(val_exist)
-        str_new = f"${val_new:.5f}" if isinstance(val_new, float) else str(val_new)
+    print("\n" + "=" * 94)
+    print("                           PG&E RATE VERIFICATION AUDIT")
+    print("=" * 94)
+    print(f"{'Tariff / Fixed Item':<38} | {'Old Rate':<10} | {'New Rate':<10} | {'Delta ($)':<10} | {'Shift %':<8} | {'Status'}")
+    print("-" * 94)
 
-        if isinstance(val_exist, float) and isinstance(val_new, float):
-            is_match = abs(val_exist - val_new) < 0.00001
-        else:
-            is_match = (val_exist == val_new)
+    updated_count = 0
+    warning_count = 0
 
-        if is_match:
-            status = "✓ Unchanged"
-        else:
-            status = "⚡ MODIFIED"
-            changes_count += 1
+    for r in records:
+        delta_str = f"{r.delta:+.5f}" if abs(r.delta) >= 0.00001 else "$0.00000"
+        pct_str = f"{r.pct_change:+.2f}%" if abs(r.delta) >= 0.00001 else "0.00%"
+        
+        status_tag = f"[{r.status}]"
+        if r.status == "REASONABLE":
+            updated_count += 1
+        elif r.status == "WARN: LARGE SHIFT":
+            updated_count += 1
+            warning_count += 1
 
-        print(f"{key:<42} | {str_exist:<14} | {str_new:<14} | {status}")
+        print(f"{r.item_name:<38} | ${r.old_rate:<9.5f} | ${r.new_rate:<9.5f} | {delta_str:<10} | {pct_str:<8} | {status_tag}")
 
-    print("=" * 84)
-    if is_dry_run:
-        print(f"DRY RUN: {changes_count} change(s) detected. No files modified.")
-    else:
-        if changes_count > 0:
-            print(f"ACTION: {changes_count} change(s) committed to {JSON_FILE}.")
-        else:
-            print("ACTION: No changes detected. File is identical.")
-    print("=" * 84 + "\n")
+    print("=" * 94)
+    mode_text = "[DRY RUN: NO FILES MODIFIED]" if is_dry_run else "[COMMITTED TO DISK]"
+    print(f"Summary: {len(records)} Total Audited | {updated_count} Changed | {warning_count} Warnings | {mode_text}\n")
 
 
 def main():
@@ -432,13 +428,19 @@ def main():
     args = parser.parse_args()
 
     tmp_xlsx = os.path.join(SCRIPT_DIR, "pge_temp.xlsx")
-    download_xlsx(XLSX_URL, tmp_xlsx)
+    try:
+        response = requests.get(XLSX_URL, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+        with open(tmp_xlsx, 'wb') as f:
+            f.write(response.content)
+    except Exception as e:
+        print(f"[Error] Failed to download XLSX: {e}")
+        return
     
     try:
         new_plans, b_credit, new_allowances, fixed_fees = parse_pge_xlsx(tmp_xlsx)
         new_plans = cleanup_bins(new_plans)
         solar_rates = fetch_pge_solar_clawback_rates()
-        cca_data = fetch_pge_cca_pdf_rates()
     except Exception as e:
         print(f"[Error] Parser Failure: {e}")
         if os.path.exists(tmp_xlsx): os.remove(tmp_xlsx)
@@ -452,24 +454,19 @@ def main():
     updated_json = json.loads(json.dumps(existing_json))
     updated_json["lastUpdated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    # 1. Baseline Credit
     if b_credit: updated_json["baselineCredit"] = b_credit
-
-    # 2. Fixed Fees
     if "fixed" not in updated_json: updated_json["fixed"] = {}
     for k, v in fixed_fees.items(): updated_json["fixed"][k] = v
 
-    # 3. Solar Rates
     if "nscRate" in solar_rates: updated_json["nscRate"] = solar_rates["nscRate"]
     if "sbpExportRate" in solar_rates: updated_json["sbpExportRate"] = solar_rates["sbpExportRate"]
+    updated_json["nbcRate"] = existing_json.get("nbcRate", 0.02154)
 
-    # 4. Baseline Allowances
     if new_allowances:
         if "baselineAllowances" not in updated_json: updated_json["baselineAllowances"] = {}
         for t, seasons in new_allowances.items():
             updated_json["baselineAllowances"][t] = seasons
 
-    # 5. Plan Rates
     if "plans" not in updated_json: updated_json["plans"] = {}
     for plan, seasons in new_plans.items():
         if plan not in updated_json["plans"]: updated_json["plans"][plan] = {}
@@ -478,17 +475,17 @@ def main():
             for b_type, rate in bins.items():
                 if rate > 0: updated_json["plans"][plan][season][b_type] = rate
 
-    # 6. CCA Profiles
     if "cca" not in updated_json: updated_json["cca"] = {}
-    for cca_id, profile in cca_data.items():
+    for cca_id, profile in DEFAULT_PGE_CCA_PROFILES.items():
         updated_json["cca"][cca_id] = profile
 
-    # Print Aligned Comparison Table
     print_comparison_table(existing_json, updated_json, is_dry_run=args.dry_run)
 
     if not args.dry_run:
+        os.makedirs(os.path.dirname(JSON_FILE), exist_ok=True)
         with open(JSON_FILE, 'w') as f:
             json.dump(updated_json, f, indent=2)
+        print(f"[SUCCESS] Updated PG&E rates committed to {JSON_FILE}")
 
     if os.path.exists(tmp_xlsx): os.remove(tmp_xlsx)
 

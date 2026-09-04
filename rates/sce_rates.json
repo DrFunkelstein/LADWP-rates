@@ -1,26 +1,18 @@
 {
-  "lastUpdated": "2026-09-01",
+  "lastUpdated": "2026-09-04 12:00",
   "fixed": {
-    "dailyCharge": 0.794,
+    "dailyCharge": 0.79400,
     "baselineCredit": 0.10108,
-    "climateCredit": 86.0,
-    "nscRate": 0.035,
-    "sbpExportRate": 0.065
+    "climateCredit": 86.00,
+    "nscRate": 0.03500,
+    "sbpExportRate": 0.06500,
+    "nbcRate": 0.02800,
+    "minimumBillDaily": 0.35000
   },
   "plans": {
-    "Domestic": {
-      "summer": {
-        "tier1": 0.30243,
-        "tier2": 0.40351
-      },
-      "winter": {
-        "tier1": 0.30243,
-        "tier2": 0.40351
-      }
-    },
     "TOU-D-4": {
       "summer": {
-        "onPeak": 0.5853,
+        "onPeak": 0.58530,
         "midPeak": 0.46523,
         "offPeak": 0.34698,
         "superOffPeak": 0.34698
@@ -28,7 +20,7 @@
       "winter": {
         "onPeak": 0.51159,
         "midPeak": 0.51159,
-        "offPeak": 0.3755,
+        "offPeak": 0.37550,
         "superOffPeak": 0.33636
       }
     },
@@ -40,8 +32,8 @@
         "superOffPeak": 0.34562
       },
       "winter": {
-        "onPeak": 0.6086,
-        "midPeak": 0.6086,
+        "onPeak": 0.60860,
+        "midPeak": 0.60860,
         "offPeak": 0.38232,
         "superOffPeak": 0.32575
       }
@@ -54,10 +46,20 @@
         "superOffPeak": 0.26786
       },
       "winter": {
-        "onPeak": 0.5658,
-        "midPeak": 0.5658,
+        "onPeak": 0.56580,
+        "midPeak": 0.56580,
         "offPeak": 0.24743,
         "superOffPeak": 0.24743
+      }
+    },
+    "Domestic": {
+      "summer": {
+        "tier1": 0.30243,
+        "tier2": 0.40351
+      },
+      "winter": {
+        "tier1": 0.30243,
+        "tier2": 0.40351
       }
     }
   },
@@ -65,7 +67,7 @@
     "CPA": {
       "name": "Clean Power Alliance",
       "fullName": "Clean Power Alliance of Southern California",
-      "pciaRate": 0.0185,
+      "pciaRate": 0.0150,
       "tiers": {
         "green": {
           "name": "100% Green Power",
@@ -77,21 +79,29 @@
         },
         "lean": {
           "name": "Lean Power (40%)",
-          "rateAdder": -0.002
+          "rateAdder": -0.0020
+        },
+        "optOut": {
+          "name": "Opted Out (100% SCE)",
+          "rateAdder": 0.0
         }
       }
     },
     "OCPA": {
       "name": "Orange County Power",
       "fullName": "Orange County Power Authority",
-      "pciaRate": 0.019,
+      "pciaRate": 0.0150,
       "tiers": {
         "100_renewable": {
           "name": "100% Renewable",
-          "rateAdder": 0.015
+          "rateAdder": 0.0150
         },
         "smart_choice": {
           "name": "Smart Choice (38%)",
+          "rateAdder": 0.0
+        },
+        "optOut": {
+          "name": "Opted Out (100% SCE)",
           "rateAdder": 0.0
         }
       }
@@ -99,29 +109,56 @@
     "SBCE": {
       "name": "Santa Barbara Clean Energy",
       "fullName": "Santa Barbara Clean Energy (City of Santa Barbara)",
-      "pciaRate": 0.0185,
+      "pciaRate": 0.0150,
       "tiers": {
         "100_green": {
-          "name": "100% Green (City Default)",
-          "rateAdder": 0.015
+          "name": "100% Green",
+          "rateAdder": 0.0150
         },
         "green_start": {
-          "name": "Green Start (Standard)",
+          "name": "Green Start",
+          "rateAdder": 0.0
+        },
+        "optOut": {
+          "name": "Opted Out (100% SCE)",
           "rateAdder": 0.0
         }
       }
     },
     "3CE": {
-      "name": "Central Coast Community Energy",
-      "fullName": "Central Coast Community Energy (Santa Barbara & SLO)",
-      "pciaRate": 0.0185,
+      "name": "Central Coast Energy",
+      "fullName": "Central Coast Community Energy",
+      "pciaRate": 0.0150,
       "tiers": {
         "3c_prime": {
           "name": "3Cprime (100% Green)",
-          "rateAdder": 0.015
+          "rateAdder": 0.0150
         },
         "3c_choice": {
-          "name": "3Cchoice (Standard Clean)",
+          "name": "3Cchoice (Clean)",
+          "rateAdder": 0.0
+        },
+        "optOut": {
+          "name": "Opted Out (100% SCE)",
+          "rateAdder": 0.0
+        }
+      }
+    },
+    "LCE": {
+      "name": "Lancaster Choice",
+      "fullName": "Lancaster Choice Energy",
+      "pciaRate": 0.0150,
+      "tiers": {
+        "smart_power": {
+          "name": "SmartPower (100%)",
+          "rateAdder": 0.0150
+        },
+        "clear_choice": {
+          "name": "ClearChoice (38%)",
+          "rateAdder": -0.0020
+        },
+        "optOut": {
+          "name": "Opted Out (100% SCE)",
           "rateAdder": 0.0
         }
       }
@@ -129,59 +166,37 @@
     "AVCE": {
       "name": "Apple Valley Choice",
       "fullName": "Apple Valley Choice Energy",
-      "pciaRate": 0.0185,
+      "pciaRate": 0.0150,
       "tiers": {
         "more_clean": {
           "name": "More Clean (50%)",
-          "rateAdder": 0.005
+          "rateAdder": 0.0050
         },
         "core_choice": {
           "name": "Core Choice (38%)",
-          "rateAdder": -0.002
-        }
-      }
-    },
-    "LCE": {
-      "name": "Lancaster Choice",
-      "fullName": "Lancaster Choice Energy",
-      "pciaRate": 0.0185,
-      "tiers": {
-        "smart_power": {
-          "name": "SmartPower (100% Solar)",
-          "rateAdder": 0.015
+          "rateAdder": -0.0020
         },
-        "clear_choice": {
-          "name": "ClearChoice (38%)",
-          "rateAdder": -0.002
+        "optOut": {
+          "name": "Opted Out (100% SCE)",
+          "rateAdder": 0.0
         }
       }
     },
     "PRIME": {
       "name": "Pico Rivera PRIME",
       "fullName": "Pico Rivera Innovative Municipal Energy",
-      "pciaRate": 0.0185,
+      "pciaRate": 0.0150,
       "tiers": {
         "prime_green": {
           "name": "PRIME Green (100%)",
-          "rateAdder": 0.015
+          "rateAdder": 0.0150
         },
         "prime_future": {
           "name": "PRIME Future (50%)",
           "rateAdder": 0.0
-        }
-      }
-    },
-    "POME": {
-      "name": "Pomona Choice",
-      "fullName": "Pomona Choice Energy",
-      "pciaRate": 0.0185,
-      "tiers": {
-        "100_green": {
-          "name": "100% Green",
-          "rateAdder": 0.015
         },
-        "choice": {
-          "name": "Pomona Choice (Standard)",
+        "optOut": {
+          "name": "Opted Out (100% SCE)",
           "rateAdder": 0.0
         }
       }
@@ -189,29 +204,56 @@
     "DCE": {
       "name": "Desert Community Energy",
       "fullName": "Desert Community Energy (Palm Springs)",
-      "pciaRate": 0.0185,
+      "pciaRate": 0.0150,
       "tiers": {
         "carbon_free": {
           "name": "100% Carbon-Free",
-          "rateAdder": 0.015
+          "rateAdder": 0.0150
         },
         "desert_saver": {
           "name": "Desert Saver",
-          "rateAdder": -0.005
+          "rateAdder": -0.0050
+        },
+        "optOut": {
+          "name": "Opted Out (100% SCE)",
+          "rateAdder": 0.0
+        }
+      }
+    },
+    "POME": {
+      "name": "Pomona Choice",
+      "fullName": "Pomona Choice Energy",
+      "pciaRate": 0.0150,
+      "tiers": {
+        "100_green": {
+          "name": "100% Green",
+          "rateAdder": 0.0150
+        },
+        "choice": {
+          "name": "Pomona Choice",
+          "rateAdder": 0.0
+        },
+        "optOut": {
+          "name": "Opted Out (100% SCE)",
+          "rateAdder": 0.0
         }
       }
     },
     "SJP": {
       "name": "San Jacinto Power",
       "fullName": "San Jacinto Power",
-      "pciaRate": 0.0185,
+      "pciaRate": 0.0150,
       "tiers": {
         "prime_green": {
-          "name": "San Jacinto Prime Green (100%)",
-          "rateAdder": 0.015
+          "name": "Prime Green (100%)",
+          "rateAdder": 0.0150
         },
         "clean_power": {
-          "name": "Clean Power (Standard)",
+          "name": "Clean Power",
+          "rateAdder": 0.0
+        },
+        "optOut": {
+          "name": "Opted Out (100% SCE)",
           "rateAdder": 0.0
         }
       }
@@ -219,29 +261,37 @@
     "RMEA": {
       "name": "Rancho Mirage Energy",
       "fullName": "Rancho Mirage Energy Authority",
-      "pciaRate": 0.0185,
+      "pciaRate": 0.0150,
       "tiers": {
         "premium_renewable": {
           "name": "Premium Renewable (100%)",
-          "rateAdder": 0.015
+          "rateAdder": 0.0150
         },
         "base_choice": {
-          "name": "Base Choice (50%)",
-          "rateAdder": -0.005
+          "name": "Base Choice",
+          "rateAdder": -0.0050
+        },
+        "optOut": {
+          "name": "Opted Out (100% SCE)",
+          "rateAdder": 0.0
         }
       }
     },
     "EPIC": {
       "name": "Palmdale Energy (EPIC)",
       "fullName": "Energy for Palmdale's Independent Choice",
-      "pciaRate": 0.0185,
+      "pciaRate": 0.0150,
       "tiers": {
         "100_green": {
-          "name": "Palmdale 100% Green",
-          "rateAdder": 0.015
+          "name": "100% Green",
+          "rateAdder": 0.0150
         },
         "clean_choice": {
-          "name": "Clean Choice (50%)",
+          "name": "Clean Choice",
+          "rateAdder": 0.0
+        },
+        "optOut": {
+          "name": "Opted Out (100% SCE)",
           "rateAdder": 0.0
         }
       }
